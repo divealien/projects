@@ -27,10 +27,12 @@ def get_chapters(filename):
     data = json.loads(out)
     chapters = []
     for ch in data.get("chapters", []):
-        chapters.append((
-            float(ch["start_time"]),
-            float(ch["end_time"])
-        ))
+        title = ch.get("tags", {}).get("title", "")
+        if title.lower() != "credits":
+            chapters.append((
+                float(ch["start_time"]),
+                float(ch["end_time"])
+            ))
     return chapters
 
 def group_chapters(chapters, target, max_duration):
@@ -105,24 +107,25 @@ def split_file(filename, groups, xvid_mode=False):
 
 def main():
     parser = argparse.ArgumentParser(description="Split MP4 file by chapters with flexible duration.")
-    parser.add_argument("filename", help="Path to the MP4 file to split")
+    parser.add_argument("filenames", nargs="+", help="Paths to the MP4 files to split")
     parser.add_argument("-t", "--target", type=int, default=30, help="Target duration in minutes (default: 30)")
     parser.add_argument("-m", "--max", type=int, default=40, help="Maximum allowed duration in minutes (default: 40)")
     parser.add_argument("--xvid", action="store_true", help="Re-encode to Xvid (AVI) for old players")
     args = parser.parse_args()
 
-    if not os.path.exists(args.filename):
-        raise FileNotFoundError(f"File not found: {args.filename}")
-
     target_seconds = args.target * 60
     max_seconds = args.max * 60
 
-    chapters = get_chapters(args.filename)
-    if not chapters:
-        raise RuntimeError("No chapters found")
+    for filename in args.filenames:
+        if not os.path.exists(filename):
+            raise FileNotFoundError(f"File not found: {filename}")
 
-    groups = group_chapters(chapters, target_seconds, max_seconds)
-    split_file(args.filename, groups, args.xvid)
+        chapters = get_chapters(filename)
+        if not chapters:
+            raise RuntimeError("No chapters found")
+
+        groups = group_chapters(chapters, target_seconds, max_seconds)
+        split_file(filename, groups, args.xvid)
 
 if __name__ == "__main__":
     main()
