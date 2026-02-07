@@ -40,7 +40,8 @@ def group_chapters(chapters, target, max_duration):
     current = []
     current_len = 0.0
 
-    for start, end in chapters:
+    n = len(chapters)
+    for i, (start, end) in enumerate(chapters):
         length = end - start
         
         if current:
@@ -51,11 +52,18 @@ def group_chapters(chapters, target, max_duration):
                 current_len = 0.0
             # If we've already reached the target duration, cut now to keep it near 30m.
             elif current_len >= target:
-                groups.append(current)
-                current = []
-                current_len = 0.0
-            # Otherwise, if we are under target, we keep adding chapters even if it 
-            # pushes us slightly over target, as long as it's under max_duration.
+                # Check if we can just finish the file in this group without exceeding max
+                remaining_duration = 0.0
+                for j in range(i, n):
+                    s, e = chapters[j]
+                    remaining_duration += (e - s)
+
+                if current_len + remaining_duration <= max_duration:
+                    pass  # Don't cut, we can fit everything!
+                else:
+                    groups.append(current)
+                    current = []
+                    current_len = 0.0
         
         current.append((start, end))
         current_len += length
