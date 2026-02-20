@@ -100,14 +100,6 @@ fun SnoozeScreen(
                     reminder.title,
                     style = MaterialTheme.typography.headlineSmall
                 )
-                if (reminder.notes.isNotBlank()) {
-                    Spacer(Modifier.height(4.dp))
-                    Text(
-                        reminder.notes,
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
             }
 
             Spacer(Modifier.height(24.dp))

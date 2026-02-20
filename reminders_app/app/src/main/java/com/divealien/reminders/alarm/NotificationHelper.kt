@@ -8,14 +8,16 @@ import android.content.Intent
 import androidx.core.app.NotificationCompat
 import com.divealien.reminders.R
 import com.divealien.reminders.domain.model.Reminder
-import com.divealien.reminders.ui.MainActivity
+import com.divealien.reminders.ui.pending.PendingNotificationsActivity
 import com.divealien.reminders.util.Constants
-import com.divealien.reminders.util.DateTimeUtils
 
 class NotificationHelper(private val context: Context) {
 
     private val notificationManager =
         context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+
+    private val prefs =
+        context.getSharedPreferences("pending_reminders", Context.MODE_PRIVATE)
 
     fun createChannel() {
         val channel = NotificationChannel(
@@ -31,90 +33,91 @@ class NotificationHelper(private val context: Context) {
     }
 
     fun showNotification(reminder: Reminder) {
-        val completePendingIntent = buildCompletePendingIntent(reminder)
-        val snoozePendingIntent = buildSnoozePendingIntent(reminder)
-
-        val timeText = DateTimeUtils.formatTime(reminder.nextTriggerTime)
-        val bigText = if (reminder.notes.isNotBlank())
-            "$timeText\n${reminder.notes}" else timeText
-
-        val builder = NotificationCompat.Builder(context, Constants.NOTIFICATION_CHANNEL_ID)
-            .setSmallIcon(R.drawable.ic_notification)
-            .setContentTitle(reminder.title)
-            .setContentText(timeText)
-            .setStyle(NotificationCompat.BigTextStyle().bigText(bigText))
-            .setContentIntent(snoozePendingIntent)
-            .addAction(0, "Complete", completePendingIntent)
-            .addAction(0, "Snooze", snoozePendingIntent)
-            .setPriority(NotificationCompat.PRIORITY_HIGH)
-            .setCategory(NotificationCompat.CATEGORY_REMINDER)
-            .setAutoCancel(false)
-            .setOngoing(true)
-            .setGroup(GROUP_KEY)
-            .setGroupAlertBehavior(NotificationCompat.GROUP_ALERT_ALL)
-
-        notificationManager.notify(reminder.id.toInt(), builder.build())
-        updateGroupSummary()
-    }
-
-    private fun buildCompletePendingIntent(reminder: Reminder): PendingIntent {
-        val intent = Intent(context, CompleteReceiver::class.java).apply {
-            action = Constants.ACTION_COMPLETE
-            putExtra(Constants.EXTRA_REMINDER_ID, reminder.id)
-        }
-        return PendingIntent.getBroadcast(
-            context,
-            (reminder.id * 10).toInt(),
-            intent,
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-        )
-    }
-
-    private fun buildSnoozePendingIntent(reminder: Reminder): PendingIntent {
-        val intent = Intent(context, MainActivity::class.java).apply {
-            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
-            putExtra(Constants.EXTRA_REMINDER_ID, reminder.id)
-            putExtra(Constants.EXTRA_SNOOZE_FLAG, true)
-        }
-        return PendingIntent.getActivity(
-            context,
-            (reminder.id * 10 + 1).toInt(),
-            intent,
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-        )
-    }
-
-    private fun updateGroupSummary() {
-        val summary = NotificationCompat.Builder(context, Constants.NOTIFICATION_CHANNEL_ID)
-            .setSmallIcon(R.drawable.ic_notification)
-            .setContentTitle("Reminders")
-            .setStyle(NotificationCompat.InboxStyle().setSummaryText("Reminders"))
-            .setPriority(NotificationCompat.PRIORITY_LOW)
-            .setCategory(NotificationCompat.CATEGORY_REMINDER)
-            .setGroup(GROUP_KEY)
-            .setGroupSummary(true)
-            .setGroupAlertBehavior(NotificationCompat.GROUP_ALERT_CHILDREN)
-            .setAutoCancel(false)
-            .setOngoing(true)
-            .build()
-
-        notificationManager.notify(SUMMARY_ID, summary)
+        addPendingId(reminder.id)
+        updateNotification(alert = true)
     }
 
     fun cancelNotification(reminderId: Long) {
-        notificationManager.cancel(reminderId.toInt())
+        removePendingId(reminderId)
+        updateNotification(alert = false)
+    }
 
-        val activeNotifications = notificationManager.activeNotifications
-        val remainingGrouped = activeNotifications.count {
-            it.id != SUMMARY_ID && it.notification.group == GROUP_KEY
+    fun getPendingIds(): Set<Long> {
+        return prefs.getStringSet(PREFS_KEY, emptySet())
+            ?.mapNotNull { it.toLongOrNull() }
+            ?.toSet() ?: emptySet()
+    }
+
+    fun clearAllPendingIds() {
+        prefs.edit().putStringSet(PREFS_KEY, emptySet()).apply()
+    }
+
+    private fun addPendingId(id: Long) {
+        val ids = getPendingIds().toMutableSet()
+        ids.add(id)
+        prefs.edit().putStringSet(PREFS_KEY, ids.map { it.toString() }.toSet()).apply()
+    }
+
+    private fun removePendingId(id: Long) {
+        val ids = getPendingIds().toMutableSet()
+        ids.remove(id)
+        prefs.edit().putStringSet(PREFS_KEY, ids.map { it.toString() }.toSet()).apply()
+    }
+
+    private fun updateNotification(alert: Boolean) {
+        val count = getPendingIds().size
+        if (count == 0) {
+            notificationManager.cancel(NOTIFICATION_ID)
+            return
         }
-        if (remainingGrouped == 0) {
-            notificationManager.cancel(SUMMARY_ID)
+
+        val title = if (count == 1) "1 reminder pending" else "$count reminders pending"
+        val contentPendingIntent = buildContentPendingIntent()
+        val deletePendingIntent = buildDeletePendingIntent()
+
+        val builder = NotificationCompat.Builder(context, Constants.NOTIFICATION_CHANNEL_ID)
+            .setSmallIcon(R.drawable.ic_notification)
+            .setContentTitle(title)
+            .setContentText("Tap to manage. Swipe to snooze all.")
+            .setContentIntent(contentPendingIntent)
+            .setDeleteIntent(deletePendingIntent)
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setCategory(NotificationCompat.CATEGORY_REMINDER)
+            .setAutoCancel(false)
+            .setOngoing(false)
+            .setOnlyAlertOnce(!alert)
+
+        notificationManager.notify(NOTIFICATION_ID, builder.build())
+    }
+
+    private fun buildDeletePendingIntent(): PendingIntent {
+        val intent = Intent(context, DismissReceiver::class.java).apply {
+            action = DismissReceiver.ACTION_DISMISS
         }
+        return PendingIntent.getBroadcast(
+            context,
+            DELETE_REQUEST_CODE,
+            intent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+    }
+
+    private fun buildContentPendingIntent(): PendingIntent {
+        val intent = Intent(context, PendingNotificationsActivity::class.java).apply {
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+        }
+        return PendingIntent.getActivity(
+            context,
+            CONTENT_REQUEST_CODE,
+            intent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
     }
 
     companion object {
-        private const val GROUP_KEY = "com.divealien.reminders.REMINDER_GROUP"
-        private const val SUMMARY_ID = Int.MAX_VALUE
+        private const val NOTIFICATION_ID = Int.MAX_VALUE
+        private const val CONTENT_REQUEST_CODE = Int.MAX_VALUE - 1
+        private const val DELETE_REQUEST_CODE = Int.MAX_VALUE - 2
+        private const val PREFS_KEY = "pending_ids"
     }
 }

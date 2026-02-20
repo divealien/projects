@@ -28,6 +28,7 @@ class MainActivity : ComponentActivity() {
 
     private var pendingSnoozeId by mutableStateOf<Long?>(null)
     private var pendingNewReminder by mutableStateOf(false)
+    private var pendingEditId by mutableStateOf<Long?>(null)
 
     private val notificationPermissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestPermission()
@@ -41,6 +42,7 @@ class MainActivity : ComponentActivity() {
         requestNotificationPermissionIfNeeded()
         checkForSnoozeIntent(intent)
         checkForShortcutIntent(intent)
+        checkForEditIntent(intent)
 
         setContent {
             RemindersTheme {
@@ -70,6 +72,16 @@ class MainActivity : ComponentActivity() {
                             pendingNewReminder = false
                         }
                     }
+
+                    val editId = pendingEditId
+                    LaunchedEffect(editId) {
+                        if (editId != null) {
+                            navController.navigate(Routes.editRoute(editId)) {
+                                launchSingleTop = true
+                            }
+                            pendingEditId = null
+                        }
+                    }
                 }
             }
         }
@@ -80,6 +92,7 @@ class MainActivity : ComponentActivity() {
         setIntent(intent)
         checkForSnoozeIntent(intent)
         checkForShortcutIntent(intent)
+        checkForEditIntent(intent)
     }
 
     private fun checkForSnoozeIntent(intent: Intent?) {
@@ -97,6 +110,15 @@ class MainActivity : ComponentActivity() {
         if (intent?.getStringExtra("shortcut_action") == "new_reminder") {
             pendingNewReminder = true
             intent.removeExtra("shortcut_action")
+        }
+    }
+
+    private fun checkForEditIntent(intent: Intent?) {
+        if (intent == null) return
+        val editId = intent.getLongExtra("edit_reminder_id", -1)
+        if (editId != -1L) {
+            pendingEditId = editId
+            intent.removeExtra("edit_reminder_id")
         }
     }
 

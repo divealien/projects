@@ -169,6 +169,53 @@ fun SettingsScreen(
 
             Spacer(Modifier.height(24.dp))
 
+            // Import section
+            Text(
+                "Import",
+                style = MaterialTheme.typography.titleMedium,
+                color = MaterialTheme.colorScheme.primary
+            )
+            Spacer(Modifier.height(8.dp))
+
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.surfaceVariant
+                )
+            ) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Text(
+                        "Import reminders from a CSV file.\nFormat: title~datetime~recurrence\nDatetime: yyyy-MM-dd HH:mm\nRecurrence: DAILY, WEEKLY, MONTHLY, YEARLY, EVERY_N_DAYS:N, or blank",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    if (uiState.importStatus.isNotEmpty()) {
+                        Spacer(Modifier.height(8.dp))
+                        Text(
+                            uiState.importStatus,
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+            }
+            Spacer(Modifier.height(8.dp))
+
+            val importFileLauncher = rememberLauncherForActivityResult(
+                contract = ActivityResultContracts.OpenDocument()
+            ) { uri: Uri? ->
+                uri?.let { viewModel.importReminders(it) }
+            }
+
+            OutlinedButton(
+                onClick = { importFileLauncher.launch(arrayOf("text/*")) },
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text("Import from File")
+            }
+
+            Spacer(Modifier.height(24.dp))
+
             // Completed Reminders section
             Text(
                 "Completed Reminders",
@@ -275,6 +322,45 @@ fun SettingsScreen(
                 }
             }
 
+            Spacer(Modifier.height(12.dp))
+
+            var dismissExpanded by remember { mutableStateOf(false) }
+            val dismissOptions = listOf(15, 30, 60, 120)
+
+            ExposedDropdownMenuBox(
+                expanded = dismissExpanded,
+                onExpandedChange = { dismissExpanded = it }
+            ) {
+                OutlinedTextField(
+                    value = when (uiState.dismissSnoozeMinutes) {
+                        in 1..59 -> "${uiState.dismissSnoozeMinutes} min"
+                        else -> "${uiState.dismissSnoozeMinutes / 60} hr"
+                    },
+                    onValueChange = {},
+                    readOnly = true,
+                    label = { Text("Swipe-to-dismiss snooze") },
+                    trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = dismissExpanded) },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .menuAnchor(MenuAnchorType.PrimaryNotEditable)
+                )
+                ExposedDropdownMenu(
+                    expanded = dismissExpanded,
+                    onDismissRequest = { dismissExpanded = false }
+                ) {
+                    dismissOptions.forEach { mins ->
+                        val label = if (mins < 60) "$mins min" else "${mins / 60} hr"
+                        DropdownMenuItem(
+                            text = { Text(label) },
+                            onClick = {
+                                viewModel.setDismissSnoozeMinutes(mins)
+                                dismissExpanded = false
+                            }
+                        )
+                    }
+                }
+            }
+
             // Snooze Presets section
             Spacer(Modifier.height(24.dp))
             Text(
@@ -305,7 +391,7 @@ fun SettingsScreen(
                                 horizontalArrangement = Arrangement.SpaceBetween
                             ) {
                                 Text(
-                                    preset.settingsLabel(),
+                                    preset.displayLabel(),
                                     style = MaterialTheme.typography.bodyMedium,
                                     modifier = Modifier.weight(1f)
                                 )
@@ -372,7 +458,7 @@ private fun AddPresetDialog(
     onDismiss: () -> Unit,
     onAdd: (SnoozePreset) -> Unit
 ) {
-    val typeOptions = listOf("Minutes", "Days", "Time of day")
+    val typeOptions = listOf("Minutes", "Days", "Tomorrow at")
     var selectedType by remember { mutableStateOf(typeOptions[0]) }
     var typeExpanded by remember { mutableStateOf(false) }
     var value by remember { mutableIntStateOf(15) }
@@ -437,7 +523,7 @@ private fun AddPresetDialog(
                             modifier = Modifier.fillMaxWidth()
                         )
                     }
-                    "Time of day" -> {
+                    "Tomorrow at" -> {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             OutlinedTextField(
                                 value = hour.toString(),
@@ -468,7 +554,7 @@ private fun AddPresetDialog(
                 val preset = when (selectedType) {
                     "Minutes" -> SnoozePreset.RelativeMinutes(value)
                     "Days" -> SnoozePreset.RelativeDays(value)
-                    "Time of day" -> SnoozePreset.TomorrowAt(hour, minute)
+                    "Tomorrow at" -> SnoozePreset.TomorrowAt(hour, minute)
                     else -> return@TextButton
                 }
                 onAdd(preset)

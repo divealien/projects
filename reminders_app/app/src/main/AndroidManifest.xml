@@ -32,6 +32,13 @@
                 android:resource="@xml/shortcuts" />
         </activity>
 
+        <activity
+            android:name=".ui.pending.PendingNotificationsActivity"
+            android:exported="false"
+            android:theme="@style/Theme.Reminders"
+            android:excludeFromRecents="true"
+            android:taskAffinity=".pending" />
+
         <receiver
             android:name=".alarm.AlarmReceiver"
             android:exported="false" />
@@ -46,6 +53,14 @@
 
         <receiver
             android:name=".alarm.CompleteReceiver"
+            android:exported="false" />
+
+        <receiver
+            android:name=".alarm.SnoozeReceiver"
+            android:exported="false" />
+
+        <receiver
+            android:name=".alarm.DismissReceiver"
             android:exported="false" />
 
     </application>

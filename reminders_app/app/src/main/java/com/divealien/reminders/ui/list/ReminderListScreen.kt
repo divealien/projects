@@ -18,10 +18,12 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.NotificationsOff
 import androidx.compose.material.icons.filled.Repeat
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Snooze
 import androidx.compose.material3.AlertDialog
@@ -38,9 +40,12 @@ import androidx.compose.material3.SwipeToDismissBoxValue
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.TextField
+import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.rememberSwipeToDismissBoxState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -48,6 +53,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -64,21 +71,62 @@ fun ReminderListScreen(
     viewModel: ReminderListViewModel = viewModel()
 ) {
     val reminders by viewModel.reminders.collectAsState()
+    val searchQuery by viewModel.searchQuery.collectAsState()
     var reminderToDelete by remember { mutableStateOf<Reminder?>(null) }
+    var isSearchActive by remember { mutableStateOf(false) }
+    val focusRequester = remember { FocusRequester() }
 
     // Sort: enabled+future first (by time), then disabled/past at bottom
-    val sortedReminders = remember(reminders) {
-        reminders.sortedWith(
+    val sortedReminders = remember(reminders, searchQuery) {
+        val filtered = if (searchQuery.isBlank()) reminders
+        else reminders.filter { it.title.contains(searchQuery, ignoreCase = true) }
+        filtered.sortedWith(
             compareByDescending<Reminder> { it.isEnabled }
                 .thenBy { if (it.isEnabled) it.nextTriggerTime else Long.MAX_VALUE }
         )
     }
 
+    LaunchedEffect(isSearchActive) {
+        if (isSearchActive) focusRequester.requestFocus()
+    }
+
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("Dave's Reminders") },
+                title = {
+                    if (isSearchActive) {
+                        TextField(
+                            value = searchQuery,
+                            onValueChange = { viewModel.setSearchQuery(it) },
+                            placeholder = { Text("Search reminders...") },
+                            singleLine = true,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .focusRequester(focusRequester),
+                            colors = TextFieldDefaults.colors(
+                                focusedContainerColor = Color.Transparent,
+                                unfocusedContainerColor = Color.Transparent,
+                                focusedIndicatorColor = Color.Transparent,
+                                unfocusedIndicatorColor = Color.Transparent
+                            )
+                        )
+                    } else {
+                        Text("Dave's Reminders")
+                    }
+                },
                 actions = {
+                    if (isSearchActive) {
+                        IconButton(onClick = {
+                            viewModel.setSearchQuery("")
+                            isSearchActive = false
+                        }) {
+                            Icon(Icons.Default.Clear, contentDescription = "Close search")
+                        }
+                    } else {
+                        IconButton(onClick = { isSearchActive = true }) {
+                            Icon(Icons.Default.Search, contentDescription = "Search")
+                        }
+                    }
                     IconButton(onClick = onOpenSettings) {
                         Icon(Icons.Default.Settings, contentDescription = "Settings")
                     }
@@ -237,8 +285,6 @@ private fun ReminderCard(
                     Text(
                         text = reminder.title,
                         style = MaterialTheme.typography.titleMedium,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
                         color = MaterialTheme.colorScheme.onSurface.copy(alpha = alpha)
                     )
                     if (reminder.isRecurring) {
@@ -269,16 +315,6 @@ private fun ReminderCard(
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = alpha)
                 )
-                if (reminder.notes.isNotBlank()) {
-                    Spacer(Modifier.height(2.dp))
-                    Text(
-                        text = reminder.notes,
-                        style = MaterialTheme.typography.bodySmall,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = alpha * 0.7f)
-                    )
-                }
             }
 
             Spacer(Modifier.width(8.dp))

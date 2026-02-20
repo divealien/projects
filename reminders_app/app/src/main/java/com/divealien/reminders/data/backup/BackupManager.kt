@@ -22,6 +22,9 @@ import kotlinx.coroutines.launch
 import java.io.BufferedReader
 import java.io.InputStreamReader
 import java.time.DayOfWeek
+import java.time.LocalDateTime
+import java.time.ZoneId
+import java.time.format.DateTimeFormatter
 
 val Context.settingsDataStore: DataStore<Preferences> by preferencesDataStore(name = "settings")
 
@@ -54,7 +57,7 @@ class BackupManager(private val context: Context, private val dao: ReminderDao) 
     /**
      * Returns null on success, or an error message string on failure.
      */
-    suspend fun performBackup(): String? {
+    suspend fun performBackup(fileName: String = Constants.BACKUP_FILE_NAME): String? {
         val uriString = getBackupFolderUri()
             ?: return "No backup folder configured"
         val folderUri = Uri.parse(uriString)
@@ -68,11 +71,11 @@ class BackupManager(private val context: Context, private val dao: ReminderDao) 
             if (!folder.exists()) return "Folder does not exist"
             if (!folder.canWrite()) return "Folder is not writable"
 
-            // Delete existing backup file
-            folder.findFile(Constants.BACKUP_FILE_NAME)?.delete()
+            // Delete existing file with same name
+            folder.findFile(fileName)?.delete()
 
             // Create new backup file
-            val backupDoc = folder.createFile("text/csv", Constants.BACKUP_FILE_NAME)
+            val backupDoc = folder.createFile("text/csv", fileName)
                 ?: return "Cannot create file in folder"
 
             context.contentResolver.openOutputStream(backupDoc.uri)?.use { output ->
@@ -126,6 +129,96 @@ class BackupManager(private val context: Context, private val dao: ReminderDao) 
         } catch (e: Exception) {
             e.printStackTrace()
             false
+        }
+    }
+
+    /**
+     * Imports reminders from a simple CSV file with human-friendly format.
+     * Format: title~datetime~recurrence
+     * datetime: yyyy-MM-dd HH:mm
+     * recurrence: DAILY, WEEKLY, MONTHLY, YEARLY, EVERY_N_DAYS:N, or blank for one-shot
+     * Returns (imported count, error message or null).
+     */
+    suspend fun importReminders(uri: Uri): Pair<Int, String?> {
+        return try {
+            val reminders = mutableListOf<ReminderEntity>()
+
+            context.contentResolver.openInputStream(uri)?.use { input ->
+                val reader = BufferedReader(InputStreamReader(input))
+                val headerLine = reader.readLine() ?: return Pair(0, "Empty file")
+                val columns = headerLine.split(DELIMITER).map { it.trim().lowercase() }
+
+                val titleIdx = columns.indexOf("title")
+                val dateTimeIdx = columns.indexOf("datetime")
+                val recurrenceIdx = columns.indexOf("recurrence")
+
+                if (titleIdx == -1 || dateTimeIdx == -1) {
+                    return Pair(0, "Missing required columns: title, datetime")
+                }
+
+                var lineNum = 1
+                reader.forEachLine { line ->
+                    lineNum++
+                    if (line.isNotBlank()) {
+                        val fields = line.split(DELIMITER)
+                        val title = fields.getOrNull(titleIdx)?.trim()?.let { unescapeField(it) } ?: return@forEachLine
+                        val dateTimeStr = fields.getOrNull(dateTimeIdx)?.trim() ?: return@forEachLine
+                        val recurrenceStr = fields.getOrNull(recurrenceIdx)?.trim() ?: ""
+
+                        if (title.isEmpty() || dateTimeStr.isEmpty()) return@forEachLine
+
+                        val localDt = try {
+                            LocalDateTime.parse(dateTimeStr, IMPORT_DATE_FORMAT)
+                        } catch (e: Exception) {
+                            return@forEachLine
+                        }
+
+                        val millis = localDt.atZone(ZoneId.systemDefault()).toInstant().toEpochMilli()
+
+                        val (recType, recInterval) = parseRecurrence(recurrenceStr)
+
+                        val now = System.currentTimeMillis()
+                        reminders.add(
+                            ReminderEntity(
+                                id = 0,
+                                title = title,
+                                nextTriggerTime = millis,
+                                originalDateTime = millis,
+                                recurrenceType = recType,
+                                recurrenceInterval = recInterval,
+                                isEnabled = true,
+                                createdAt = now,
+                                updatedAt = now
+                            )
+                        )
+                    }
+                }
+            } ?: return Pair(0, "Cannot read file")
+
+            val insertedIds = mutableListOf<Long>()
+            for (reminder in reminders) {
+                val id = dao.insert(reminder)
+                insertedIds.add(id)
+            }
+
+            Pair(insertedIds.size, null)
+        } catch (e: Exception) {
+            Pair(0, e.message ?: "Unknown error")
+        }
+    }
+
+    private fun parseRecurrence(value: String): Pair<RecurrenceType, Int?> {
+        if (value.isBlank() || value.equals("NONE", ignoreCase = true)) {
+            return Pair(RecurrenceType.NONE, null)
+        }
+        if (value.startsWith("EVERY_N_DAYS:", ignoreCase = true)) {
+            val n = value.substringAfter(":").trim().toIntOrNull() ?: 1
+            return Pair(RecurrenceType.EVERY_N_DAYS, n)
+        }
+        return try {
+            Pair(RecurrenceType.valueOf(value.uppercase()), null)
+        } catch (e: Exception) {
+            Pair(RecurrenceType.NONE, null)
         }
     }
 
@@ -185,6 +278,7 @@ class BackupManager(private val context: Context, private val dao: ReminderDao) 
         private const val DELIMITER = "~"
         private const val CSV_HEADER =
             "id~title~notes~nextTriggerTime~originalDateTime~recurrenceType~recurrenceInterval~recurrenceDaysOfWeek~isEnabled~isSnoozed~snoozeUntil~createdAt~updatedAt~completedAt"
+        private val IMPORT_DATE_FORMAT = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm")
 
         private fun escapeField(value: String): String {
             return value

@@ -15,7 +15,6 @@ import java.time.LocalDateTime
 
 data class EditUiState(
     val title: String = "",
-    val notes: String = "",
     val dateTime: LocalDateTime = LocalDateTime.now().plusHours(1).withMinute(0).withSecond(0),
     val recurrenceType: RecurrenceType = RecurrenceType.NONE,
     val recurrenceInterval: Int = 1,
@@ -59,10 +58,6 @@ class ReminderEditViewModel(application: Application) : AndroidViewModel(applica
         _uiState.value = _uiState.value.copy(title = title)
     }
 
-    fun updateNotes(notes: String) {
-        _uiState.value = _uiState.value.copy(notes = notes)
-    }
-
     fun updateDateTime(dateTime: LocalDateTime) {
         _uiState.value = _uiState.value.copy(dateTime = dateTime)
     }
@@ -92,7 +87,6 @@ class ReminderEditViewModel(application: Application) : AndroidViewModel(applica
             val reminder = Reminder(
                 id = existing?.id ?: 0L,
                 title = state.title.trim(),
-                notes = state.notes.trim(),
                 nextTriggerTime = epochMillis,
                 originalDateTime = if (existing != null) existing.originalDateTime else epochMillis,
                 recurrenceType = state.recurrenceType,

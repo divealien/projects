@@ -5,6 +5,7 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.divealien.reminders.RemindersApp
 import com.divealien.reminders.domain.model.Reminder
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.stateIn
@@ -18,6 +19,13 @@ class ReminderListViewModel(application: Application) : AndroidViewModel(applica
 
     val reminders: StateFlow<List<Reminder>> = repository.getRemindersExcludeCompleted()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    private val _searchQuery = MutableStateFlow("")
+    val searchQuery: StateFlow<String> = _searchQuery
+
+    fun setSearchQuery(query: String) {
+        _searchQuery.value = query
+    }
 
     fun deleteReminder(reminder: Reminder) {
         viewModelScope.launch {

@@ -1,7 +1,11 @@
 {
   "permissions": {
     "allow": [
-      "WebSearch"
+      "WebSearch",
+      "Bash(.gradlew assembleDebug)",
+      "Bash(cd:*)",
+      "Bash(gradlew.bat assembleDebug:*)",
+      "Bash(cmd /c \"cd /d D:\\\\projects\\\\reminders_app && gradlew.bat assembleDebug\")"
     ]
   }
 }
