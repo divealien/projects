@@ -1,6 +1,7 @@
 package com.divealien.reminders.ui.edit.components
 
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -13,6 +14,8 @@ import androidx.compose.material.icons.filled.AccessTime
 import androidx.compose.material.icons.filled.CalendarMonth
 import androidx.compose.material3.DatePicker
 import androidx.compose.material3.DatePickerDialog
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -32,6 +35,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import java.time.Instant
+import java.time.LocalDate
 import java.time.LocalDateTime
 import java.time.LocalTime
 import java.time.ZoneId
@@ -45,11 +49,19 @@ fun DateTimePicker(
     onDateTimeChanged: (LocalDateTime) -> Unit,
     modifier: Modifier = Modifier
 ) {
+    var showDateDropdown by remember { mutableStateOf(false) }
     var showDatePicker by remember { mutableStateOf(false) }
     var showTimePicker by remember { mutableStateOf(false) }
 
     val dateFormatter = remember { DateTimeFormatter.ofPattern("EEE, MMM d, yyyy") }
     val timeFormatter = remember { DateTimeFormatter.ofPattern("HH:mm") }
+
+    val today = LocalDate.now()
+    val dateLabel = when (dateTime.toLocalDate()) {
+        today -> "Today"
+        today.plusDays(1) -> "Tomorrow"
+        else -> dateTime.format(dateFormatter)
+    }
 
     Column(modifier = modifier.fillMaxWidth()) {
         Text(
@@ -59,24 +71,52 @@ fun DateTimePicker(
         )
         Spacer(Modifier.height(8.dp))
         Row(modifier = Modifier.fillMaxWidth()) {
-            OutlinedCard(
-                modifier = Modifier
-                    .weight(1f)
-                    .clickable { showDatePicker = true }
-            ) {
-                Row(
-                    modifier = Modifier.padding(12.dp),
-                    verticalAlignment = Alignment.CenterVertically
+            Box(modifier = Modifier.weight(1f)) {
+                OutlinedCard(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { showDateDropdown = true }
                 ) {
-                    Icon(
-                        Icons.Default.CalendarMonth,
-                        contentDescription = "Pick date",
-                        tint = MaterialTheme.colorScheme.primary
+                    Row(
+                        modifier = Modifier.padding(12.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            Icons.Default.CalendarMonth,
+                            contentDescription = "Pick date",
+                            tint = MaterialTheme.colorScheme.primary
+                        )
+                        Spacer(Modifier.width(8.dp))
+                        Text(
+                            dateLabel,
+                            style = MaterialTheme.typography.bodyLarge
+                        )
+                    }
+                }
+                DropdownMenu(
+                    expanded = showDateDropdown,
+                    onDismissRequest = { showDateDropdown = false }
+                ) {
+                    DropdownMenuItem(
+                        text = { Text("Today") },
+                        onClick = {
+                            onDateTimeChanged(LocalDateTime.of(today, dateTime.toLocalTime()))
+                            showDateDropdown = false
+                        }
                     )
-                    Spacer(Modifier.width(8.dp))
-                    Text(
-                        dateTime.format(dateFormatter),
-                        style = MaterialTheme.typography.bodyLarge
+                    DropdownMenuItem(
+                        text = { Text("Tomorrow") },
+                        onClick = {
+                            onDateTimeChanged(LocalDateTime.of(today.plusDays(1), dateTime.toLocalTime()))
+                            showDateDropdown = false
+                        }
+                    )
+                    DropdownMenuItem(
+                        text = { Text("Select...") },
+                        onClick = {
+                            showDateDropdown = false
+                            showDatePicker = true
+                        }
                     )
                 }
             }
