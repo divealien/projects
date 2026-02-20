@@ -15,6 +15,7 @@ import java.time.LocalDateTime
 
 data class EditUiState(
     val title: String = "",
+    val notes: String = "",
     val dateTime: LocalDateTime = LocalDateTime.now().plusHours(1).withMinute(0).withSecond(0),
     val recurrenceType: RecurrenceType = RecurrenceType.NONE,
     val recurrenceInterval: Int = 1,

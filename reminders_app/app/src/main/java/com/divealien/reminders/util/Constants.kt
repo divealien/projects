@@ -10,4 +10,7 @@ object Constants {
     const val BACKUP_FILE_NAME = "reminders_backup.csv"
 
     const val BACKUP_DEBOUNCE_MS = 2000L
+
+    const val EXTRA_SNOOZE_DURATION = "extra_snooze_duration"
+    const val SNOOZE_10_MIN = 10 * 60 * 1000L
 }
