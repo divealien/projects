@@ -106,10 +106,7 @@ fun ReminderEditScreen(
                 value = uiState.title,
                 onValueChange = viewModel::updateTitle,
                 label = { Text("Title") },
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .focusRequester(focusRequester),
-                singleLine = true
+                modifier = Modifier.fillMaxWidth().focusRequester(focusRequester)
             )
 
             Spacer(Modifier.height(20.dp))
