@@ -55,7 +55,8 @@ fun NavGraph(navController: NavHostController) {
 
         composable(Routes.COMPLETED) {
             CompletedRemindersScreen(
-                onNavigateBack = { navController.popBackStack() }
+                onNavigateBack = { navController.popBackStack() },
+                onEditReminder = { id -> navController.navigate(Routes.editRoute(id)) }
             )
         }
 

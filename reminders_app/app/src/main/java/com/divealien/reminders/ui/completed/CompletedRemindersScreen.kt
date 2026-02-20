@@ -43,6 +43,7 @@ import com.divealien.reminders.util.DateTimeUtils
 @Composable
 fun CompletedRemindersScreen(
     onNavigateBack: () -> Unit,
+    onEditReminder: (Long) -> Unit,
     viewModel: CompletedRemindersViewModel = viewModel()
 ) {
     val reminders by viewModel.completedReminders.collectAsState()
@@ -87,7 +88,8 @@ fun CompletedRemindersScreen(
                 items(reminders, key = { it.id }) { reminder ->
                     CompletedReminderItem(
                         reminder = reminder,
-                        onDelete = { viewModel.permanentlyDelete(reminder) }
+                        onDelete = { viewModel.permanentlyDelete(reminder) },
+                        onEdit = { onEditReminder(reminder.id) }
                     )
                 }
                 item { Spacer(Modifier.height(8.dp)) }
@@ -100,7 +102,8 @@ fun CompletedRemindersScreen(
 @Composable
 private fun CompletedReminderItem(
     reminder: Reminder,
-    onDelete: () -> Unit
+    onDelete: () -> Unit,
+    onEdit: () -> Unit
 ) {
     val dismissState = rememberSwipeToDismissBoxState()
 
@@ -137,6 +140,7 @@ private fun CompletedReminderItem(
         }
     ) {
         Card(
+            onClick = onEdit,
             modifier = Modifier.fillMaxWidth(),
             colors = CardDefaults.cardColors(
                 containerColor = MaterialTheme.colorScheme.surfaceVariant
