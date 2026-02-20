@@ -305,7 +305,7 @@ fun SettingsScreen(
                                 horizontalArrangement = Arrangement.SpaceBetween
                             ) {
                                 Text(
-                                    preset.displayLabel(),
+                                    preset.settingsLabel(),
                                     style = MaterialTheme.typography.bodyMedium,
                                     modifier = Modifier.weight(1f)
                                 )
@@ -372,7 +372,7 @@ private fun AddPresetDialog(
     onDismiss: () -> Unit,
     onAdd: (SnoozePreset) -> Unit
 ) {
-    val typeOptions = listOf("Minutes", "Days", "Tomorrow at")
+    val typeOptions = listOf("Minutes", "Days", "Time of day")
     var selectedType by remember { mutableStateOf(typeOptions[0]) }
     var typeExpanded by remember { mutableStateOf(false) }
     var value by remember { mutableIntStateOf(15) }
@@ -437,7 +437,7 @@ private fun AddPresetDialog(
                             modifier = Modifier.fillMaxWidth()
                         )
                     }
-                    "Tomorrow at" -> {
+                    "Time of day" -> {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             OutlinedTextField(
                                 value = hour.toString(),
@@ -468,7 +468,7 @@ private fun AddPresetDialog(
                 val preset = when (selectedType) {
                     "Minutes" -> SnoozePreset.RelativeMinutes(value)
                     "Days" -> SnoozePreset.RelativeDays(value)
-                    "Tomorrow at" -> SnoozePreset.TomorrowAt(hour, minute)
+                    "Time of day" -> SnoozePreset.TomorrowAt(hour, minute)
                     else -> return@TextButton
                 }
                 onAdd(preset)

@@ -11,6 +11,7 @@ sealed class SnoozePreset {
 
     abstract fun computeTargetTime(): Long
     abstract fun displayLabel(): String
+    open fun settingsLabel(): String = displayLabel()
 
     data class RelativeMinutes(val minutes: Int) : SnoozePreset() {
         override fun computeTargetTime(): Long =
@@ -38,24 +39,32 @@ sealed class SnoozePreset {
     }
 
     data class TomorrowAt(val hour: Int, val minute: Int) : SnoozePreset() {
-        override fun computeTargetTime(): Long {
-            val tomorrow = LocalDate.now().plusDays(1)
-            val target = LocalDateTime.of(tomorrow, LocalTime.of(hour, minute))
-            return target.atZone(ZoneId.systemDefault()).toInstant().toEpochMilli()
+        private fun targetDateTime(): LocalDateTime {
+            val todayAt = LocalDateTime.of(LocalDate.now(), LocalTime.of(hour, minute))
+            return if (todayAt.isAfter(LocalDateTime.now())) todayAt
+            else todayAt.plusDays(1)
         }
 
+        override fun computeTargetTime(): Long =
+            targetDateTime().atZone(ZoneId.systemDefault()).toInstant().toEpochMilli()
+
         override fun displayLabel(): String {
+            val isToday = targetDateTime().toLocalDate() == LocalDate.now()
+            val prefix = if (isToday) "Today" else "Tomorrow"
+            return "$prefix ${timeLabel()}"
+        }
+
+        override fun settingsLabel(): String = timeLabel()
+
+        private fun timeLabel(): String {
             val period = if (hour < 12) "AM" else "PM"
             val displayHour = when {
                 hour == 0 -> 12
                 hour > 12 -> hour - 12
                 else -> hour
             }
-            return if (minute == 0) {
-                "Tomorrow $displayHour $period"
-            } else {
-                "Tomorrow $displayHour:%02d $period".format(minute)
-            }
+            return if (minute == 0) "$displayHour $period"
+            else "$displayHour:%02d $period".format(minute)
         }
     }
 
