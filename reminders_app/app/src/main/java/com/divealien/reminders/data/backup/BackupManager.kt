@@ -22,6 +22,7 @@ import kotlinx.coroutines.launch
 import java.io.BufferedReader
 import java.io.InputStreamReader
 import java.time.DayOfWeek
+import java.time.Instant
 import java.time.LocalDateTime
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
@@ -46,85 +47,85 @@ class BackupManager(private val context: Context, private val dao: ReminderDao) 
         }
     }
 
+    /** Debounced auto-backup triggered on every data mutation. Writes to fixed rolling filename. */
     fun requestBackup() {
         debounceJob?.cancel()
         debounceJob = scope.launch {
             delay(Constants.BACKUP_DEBOUNCE_MS)
-            performBackup()
+            performBackup(Constants.BACKUP_FILE_NAME)
         }
     }
 
     /**
-     * Returns null on success, or an error message string on failure.
+     * Manual backup — writes a timestamped file so auto-backups never overwrite it.
+     * Returns the filename on success, or null + error string on failure.
+     */
+    suspend fun performManualBackup(): Pair<String?, String?> {
+        val timestamp = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMdd_HHmmss"))
+        val fileName = "reminders_$timestamp.csv"
+        val error = performBackup(fileName)
+        return if (error == null) Pair(fileName, null) else Pair(null, error)
+    }
+
+    /**
+     * Writes all reminders to [fileName] in the configured backup folder.
+     * Returns null on success, or an error message on failure.
      */
     suspend fun performBackup(fileName: String = Constants.BACKUP_FILE_NAME): String? {
-        val uriString = getBackupFolderUri()
-            ?: return "No backup folder configured"
+        val uriString = getBackupFolderUri() ?: return "No backup folder configured"
         val folderUri = Uri.parse(uriString)
 
         return try {
             val reminders = dao.getAllRemindersList()
-
             val folder = DocumentFile.fromTreeUri(context, folderUri)
                 ?: return "Cannot access folder"
-
             if (!folder.exists()) return "Folder does not exist"
             if (!folder.canWrite()) return "Folder is not writable"
 
-            // Delete existing file with same name
             folder.findFile(fileName)?.delete()
-
-            // Create new backup file
             val backupDoc = folder.createFile("text/csv", fileName)
                 ?: return "Cannot create file in folder"
 
             context.contentResolver.openOutputStream(backupDoc.uri)?.use { output ->
                 val writer = output.bufferedWriter()
-                writer.write(CSV_HEADER)
+                writer.write(BACKUP_HEADER)
                 writer.newLine()
                 for (reminder in reminders) {
-                    writer.write(reminderToCsvRow(reminder))
+                    writer.write(formatBackupRow(reminder))
                     writer.newLine()
                 }
                 writer.flush()
             }
-
-            null // success
+            null
         } catch (e: Exception) {
             e.message ?: "Unknown error"
         }
     }
 
-    suspend fun restoreBackup(): Boolean {
-        val uriString = getBackupFolderUri() ?: return false
-        val folderUri = Uri.parse(uriString)
-
+    /**
+     * Restores from a user-picked URI. Replaces all current reminders.
+     * Returns true on success.
+     */
+    suspend fun restoreFromUri(uri: Uri): Boolean {
         return try {
-            val folder = DocumentFile.fromTreeUri(context, folderUri) ?: return false
-            val backupDoc = folder.findFile(Constants.BACKUP_FILE_NAME) ?: return false
-
             val reminders = mutableListOf<ReminderEntity>()
 
-            context.contentResolver.openInputStream(backupDoc.uri)?.use { input ->
+            context.contentResolver.openInputStream(uri)?.use { input ->
                 val reader = BufferedReader(InputStreamReader(input))
                 val headerLine = reader.readLine() ?: return false
-                val columns = headerLine.split(DELIMITER)
+                val columns = headerLine.split(DELIMITER).map { it.trim().lowercase() }
 
                 reader.forEachLine { line ->
                     if (line.isNotBlank()) {
-                        val entity = csvRowToReminder(line, columns)
-                        if (entity != null) {
-                            reminders.add(entity)
-                        }
+                        parseBackupRow(line.split(DELIMITER), columns)?.let { reminders.add(it) }
                     }
                 }
-            }
+            } ?: return false
 
             dao.deleteAll()
             for (reminder in reminders) {
                 dao.insert(reminder)
             }
-
             true
         } catch (e: Exception) {
             e.printStackTrace()
@@ -133,10 +134,8 @@ class BackupManager(private val context: Context, private val dao: ReminderDao) 
     }
 
     /**
-     * Imports reminders from a simple CSV file with human-friendly format.
+     * Imports reminders from a simple CSV file (adds to existing, does not replace).
      * Format: title~datetime~recurrence
-     * datetime: yyyy-MM-dd HH:mm
-     * recurrence: DAILY, WEEKLY, MONTHLY, YEARLY, EVERY_N_DAYS:N, or blank for one-shot
      * Returns (imported count, error message or null).
      */
     suspend fun importReminders(uri: Uri): Pair<Int, String?> {
@@ -156,9 +155,7 @@ class BackupManager(private val context: Context, private val dao: ReminderDao) 
                     return Pair(0, "Missing required columns: title, datetime")
                 }
 
-                var lineNum = 1
                 reader.forEachLine { line ->
-                    lineNum++
                     if (line.isNotBlank()) {
                         val fields = line.split(DELIMITER)
                         val title = fields.getOrNull(titleIdx)?.trim()?.let { unescapeField(it) } ?: return@forEachLine
@@ -167,17 +164,10 @@ class BackupManager(private val context: Context, private val dao: ReminderDao) 
 
                         if (title.isEmpty() || dateTimeStr.isEmpty()) return@forEachLine
 
-                        val localDt = try {
-                            LocalDateTime.parse(dateTimeStr, IMPORT_DATE_FORMAT)
-                        } catch (e: Exception) {
-                            return@forEachLine
-                        }
-
-                        val millis = localDt.atZone(ZoneId.systemDefault()).toInstant().toEpochMilli()
-
-                        val (recType, recInterval) = parseRecurrence(recurrenceStr)
-
+                        val millis = parseMillis(dateTimeStr) ?: return@forEachLine
+                        val (recType, recInterval, recDays) = parseRecurrenceFull(recurrenceStr)
                         val now = System.currentTimeMillis()
+
                         reminders.add(
                             ReminderEntity(
                                 id = 0,
@@ -186,6 +176,7 @@ class BackupManager(private val context: Context, private val dao: ReminderDao) 
                                 originalDateTime = millis,
                                 recurrenceType = recType,
                                 recurrenceInterval = recInterval,
+                                recurrenceDaysOfWeek = recDays,
                                 isEnabled = true,
                                 createdAt = now,
                                 updatedAt = now
@@ -197,71 +188,70 @@ class BackupManager(private val context: Context, private val dao: ReminderDao) 
 
             val insertedIds = mutableListOf<Long>()
             for (reminder in reminders) {
-                val id = dao.insert(reminder)
-                insertedIds.add(id)
+                insertedIds.add(dao.insert(reminder))
             }
-
             Pair(insertedIds.size, null)
         } catch (e: Exception) {
             Pair(0, e.message ?: "Unknown error")
         }
     }
 
-    private fun parseRecurrence(value: String): Pair<RecurrenceType, Int?> {
-        if (value.isBlank() || value.equals("NONE", ignoreCase = true)) {
-            return Pair(RecurrenceType.NONE, null)
-        }
-        if (value.startsWith("EVERY_N_DAYS:", ignoreCase = true)) {
-            val n = value.substringAfter(":").trim().toIntOrNull() ?: 1
-            return Pair(RecurrenceType.EVERY_N_DAYS, n)
-        }
-        return try {
-            Pair(RecurrenceType.valueOf(value.uppercase()), null)
-        } catch (e: Exception) {
-            Pair(RecurrenceType.NONE, null)
-        }
-    }
+    // ---- Format helpers ----
 
-    private fun reminderToCsvRow(r: ReminderEntity): String {
+    private fun formatBackupRow(r: ReminderEntity): String {
         val fields = listOf(
-            r.id.toString(),
             escapeField(r.title),
+            formatMillis(r.nextTriggerTime),
+            formatMillis(r.originalDateTime),
+            formatRecurrence(r.recurrenceType, r.recurrenceInterval, r.recurrenceDaysOfWeek),
             escapeField(r.notes),
-            r.nextTriggerTime.toString(),
-            r.originalDateTime.toString(),
-            r.recurrenceType.name,
-            r.recurrenceInterval?.toString() ?: "",
-            if (r.recurrenceDaysOfWeek.isEmpty()) "" else r.recurrenceDaysOfWeek.joinToString(",") { it.value.toString() },
             r.isEnabled.toString(),
             r.isSnoozed.toString(),
-            r.snoozeUntil?.toString() ?: "",
-            r.createdAt.toString(),
-            r.updatedAt.toString(),
-            r.completedAt?.toString() ?: ""
+            r.snoozeUntil?.let { formatMillis(it) } ?: "",
+            formatMillis(r.createdAt),
+            r.completedAt?.let { formatMillis(it) } ?: "",
+            r.id.toString()
         )
         return fields.joinToString(DELIMITER)
     }
 
-    private fun csvRowToReminder(line: String, columns: List<String>): ReminderEntity? {
+    private fun parseBackupRow(fields: List<String>, columns: List<String>): ReminderEntity? {
         return try {
-            val fields = line.split(DELIMITER)
             val map = columns.zip(fields).toMap()
 
+            val title = map["title"]?.let { unescapeField(it) }?.takeIf { it.isNotEmpty() } ?: return null
+            val dateTimeStr = map["datetime"]?.takeIf { it.isNotBlank() } ?: return null
+            val originalDateTimeStr = map["originaldatetime"]?.takeIf { it.isNotBlank() } ?: dateTimeStr
+            val recurrenceStr = map["recurrence"] ?: ""
+            val notes = map["notes"]?.let { unescapeField(it) } ?: ""
+            val isEnabled = map["isenabled"]?.toBooleanStrictOrNull() ?: true
+            val isSnoozed = map["issnoozed"]?.toBooleanStrictOrNull() ?: false
+
+            val nextTriggerTime = parseMillis(dateTimeStr) ?: return null
+            val originalDateTime = parseMillis(originalDateTimeStr) ?: nextTriggerTime
+            val snoozeUntil = map["snoozeuntil"]?.takeIf { it.isNotBlank() }?.let { parseMillis(it) }
+            val createdAt = map["createdat"]?.takeIf { it.isNotBlank() }?.let { parseMillis(it) }
+                ?: System.currentTimeMillis()
+            val completedAt = map["completedat"]?.takeIf { it.isNotBlank() }?.let { parseMillis(it) }
+            val id = map["id"]?.toLongOrNull() ?: 0L
+
+            val (recType, recInterval, recDays) = parseRecurrenceFull(recurrenceStr)
+
             ReminderEntity(
-                id = map["id"]?.toLongOrNull() ?: return null,
-                title = unescapeField(map["title"] ?: ""),
-                notes = unescapeField(map["notes"] ?: ""),
-                nextTriggerTime = map["nextTriggerTime"]?.toLongOrNull() ?: return null,
-                originalDateTime = map["originalDateTime"]?.toLongOrNull() ?: return null,
-                recurrenceType = map["recurrenceType"]?.let { RecurrenceType.valueOf(it) } ?: RecurrenceType.NONE,
-                recurrenceInterval = map["recurrenceInterval"]?.takeIf { it.isNotEmpty() }?.toIntOrNull(),
-                recurrenceDaysOfWeek = parseDaysOfWeek(map["recurrenceDaysOfWeek"] ?: ""),
-                isEnabled = map["isEnabled"]?.toBooleanStrictOrNull() ?: true,
-                isSnoozed = map["isSnoozed"]?.toBooleanStrictOrNull() ?: false,
-                snoozeUntil = map["snoozeUntil"]?.takeIf { it.isNotEmpty() }?.toLongOrNull(),
-                createdAt = map["createdAt"]?.toLongOrNull() ?: System.currentTimeMillis(),
-                updatedAt = map["updatedAt"]?.toLongOrNull() ?: System.currentTimeMillis(),
-                completedAt = map["completedAt"]?.takeIf { it.isNotEmpty() }?.toLongOrNull()
+                id = id,
+                title = title,
+                notes = notes,
+                nextTriggerTime = nextTriggerTime,
+                originalDateTime = originalDateTime,
+                recurrenceType = recType,
+                recurrenceInterval = recInterval,
+                recurrenceDaysOfWeek = recDays,
+                isEnabled = isEnabled,
+                isSnoozed = isSnoozed,
+                snoozeUntil = snoozeUntil,
+                createdAt = createdAt,
+                updatedAt = System.currentTimeMillis(),
+                completedAt = completedAt
             )
         } catch (e: Exception) {
             e.printStackTrace()
@@ -269,24 +259,60 @@ class BackupManager(private val context: Context, private val dao: ReminderDao) 
         }
     }
 
-    private fun parseDaysOfWeek(value: String): List<DayOfWeek> {
-        if (value.isBlank()) return emptyList()
-        return value.split(",").mapNotNull { it.trim().toIntOrNull()?.let { v -> DayOfWeek.of(v) } }
+    private fun formatMillis(millis: Long): String =
+        LocalDateTime.ofInstant(Instant.ofEpochMilli(millis), ZoneId.systemDefault())
+            .format(DATE_FORMAT)
+
+    private fun parseMillis(dateStr: String): Long? =
+        try {
+            LocalDateTime.parse(dateStr.trim(), DATE_FORMAT)
+                .atZone(ZoneId.systemDefault()).toInstant().toEpochMilli()
+        } catch (e: Exception) { null }
+
+    private fun formatRecurrence(type: RecurrenceType, interval: Int?, days: List<DayOfWeek>): String =
+        when (type) {
+            RecurrenceType.NONE -> ""
+            RecurrenceType.DAILY -> "DAILY"
+            RecurrenceType.EVERY_N_DAYS -> "EVERY_N_DAYS:${interval ?: 1}"
+            RecurrenceType.WEEKLY -> {
+                if (days.isEmpty()) "WEEKLY"
+                else "WEEKLY:" + days.sorted().joinToString(",") { it.name.take(3) }
+            }
+            RecurrenceType.MONTHLY -> "MONTHLY"
+            RecurrenceType.YEARLY -> "YEARLY"
+        }
+
+    private data class RecurrenceResult(val type: RecurrenceType, val interval: Int?, val days: List<DayOfWeek>)
+
+    private fun parseRecurrenceFull(value: String): RecurrenceResult {
+        if (value.isBlank() || value.equals("NONE", ignoreCase = true)) {
+            return RecurrenceResult(RecurrenceType.NONE, null, emptyList())
+        }
+        if (value.startsWith("EVERY_N_DAYS:", ignoreCase = true)) {
+            val n = value.substringAfter(":").trim().toIntOrNull() ?: 1
+            return RecurrenceResult(RecurrenceType.EVERY_N_DAYS, n, emptyList())
+        }
+        if (value.startsWith("WEEKLY:", ignoreCase = true)) {
+            val days = value.substringAfter(":").split(",")
+                .mapNotNull { abbr -> DayOfWeek.entries.firstOrNull { it.name.startsWith(abbr.trim().uppercase()) } }
+            return RecurrenceResult(RecurrenceType.WEEKLY, null, days)
+        }
+        return try {
+            RecurrenceResult(RecurrenceType.valueOf(value.uppercase()), null, emptyList())
+        } catch (e: Exception) {
+            RecurrenceResult(RecurrenceType.NONE, null, emptyList())
+        }
     }
 
     companion object {
         private const val DELIMITER = "~"
-        private const val CSV_HEADER =
-            "id~title~notes~nextTriggerTime~originalDateTime~recurrenceType~recurrenceInterval~recurrenceDaysOfWeek~isEnabled~isSnoozed~snoozeUntil~createdAt~updatedAt~completedAt"
-        private val IMPORT_DATE_FORMAT = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm")
+        private const val BACKUP_HEADER =
+            "title~datetime~originalDatetime~recurrence~notes~isEnabled~isSnoozed~snoozeUntil~createdAt~completedAt~id"
+        private val DATE_FORMAT = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm")
 
-        private fun escapeField(value: String): String {
-            return value
-                .replace("\\", "\\\\")
-                .replace("~", "\\~")
-                .replace("\n", "\\n")
-                .replace("\r", "\\r")
-        }
+        private fun escapeField(value: String): String =
+            value.replace("\\", "\\\\").replace("~", "\\~")
+                .replace("\n", "\\n").replace("\r", "\\r")
 
         private fun unescapeField(value: String): String {
             val sb = StringBuilder(value.length)
@@ -295,9 +321,9 @@ class BackupManager(private val context: Context, private val dao: ReminderDao) 
                 if (value[i] == '\\' && i + 1 < value.length) {
                     when (value[i + 1]) {
                         '\\' -> { sb.append('\\'); i += 2 }
-                        '~' -> { sb.append('~'); i += 2 }
-                        'n' -> { sb.append('\n'); i += 2 }
-                        'r' -> { sb.append('\r'); i += 2 }
+                        '~'  -> { sb.append('~');  i += 2 }
+                        'n'  -> { sb.append('\n'); i += 2 }
+                        'r'  -> { sb.append('\r'); i += 2 }
                         else -> { sb.append(value[i]); i++ }
                     }
                 } else {

@@ -63,8 +63,8 @@ fun SettingsScreen(
 ) {
     val uiState by viewModel.uiState.collectAsState()
     val context = LocalContext.current
-    var showRestoreDialog by remember { mutableStateOf(false) }
     var showAddPresetDialog by remember { mutableStateOf(false) }
+    var pendingRestoreUri by remember { mutableStateOf<Uri?>(null) }
 
     val folderPickerLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenDocumentTree()
@@ -82,6 +82,12 @@ fun SettingsScreen(
         contract = ActivityResultContracts.OpenDocument()
     ) { uri: Uri? ->
         uri?.let { viewModel.importReminders(it) }
+    }
+
+    val restorePickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocument()
+    ) { uri: Uri? ->
+        uri?.let { pendingRestoreUri = it }
     }
 
     Scaffold(
@@ -165,11 +171,11 @@ fun SettingsScreen(
                 Spacer(Modifier.height(8.dp))
 
                 OutlinedButton(
-                    onClick = { showRestoreDialog = true },
+                    onClick = { restorePickerLauncher.launch(arrayOf("text/*", "*/*")) },
                     modifier = Modifier.fillMaxWidth(),
                     enabled = !uiState.isRestoring
                 ) {
-                    Text("Restore from Backup")
+                    Text("Restore from Backup…")
                 }
             }
 
@@ -376,21 +382,24 @@ fun SettingsScreen(
         )
     }
 
-    if (showRestoreDialog) {
+    pendingRestoreUri?.let { uri ->
         AlertDialog(
-            onDismissRequest = { showRestoreDialog = false },
+            onDismissRequest = { pendingRestoreUri = null },
             title = { Text("Restore from Backup?") },
-            text = { Text("This will replace all current reminders with the backup data. This cannot be undone.") },
+            text = {
+                val name = uri.lastPathSegment?.substringAfterLast('/') ?: uri.lastPathSegment ?: "selected file"
+                Text("This will replace all current reminders with the contents of \"$name\". This cannot be undone.")
+            },
             confirmButton = {
                 TextButton(onClick = {
-                    viewModel.restoreBackup()
-                    showRestoreDialog = false
+                    viewModel.restoreBackup(uri)
+                    pendingRestoreUri = null
                 }) {
                     Text("Restore")
                 }
             },
             dismissButton = {
-                TextButton(onClick = { showRestoreDialog = false }) {
+                TextButton(onClick = { pendingRestoreUri = null }) {
                     Text("Cancel")
                 }
             }

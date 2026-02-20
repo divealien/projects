@@ -133,12 +133,11 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
         }
     }
 
-    fun restoreBackup() {
+    fun restoreBackup(uri: Uri) {
         viewModelScope.launch {
             _uiState.value = _uiState.value.copy(isRestoring = true, backupStatus = "Restoring...")
-            val success = backupManager.restoreBackup()
+            val success = backupManager.restoreFromUri(uri)
             if (success) {
-                // Reschedule all alarms
                 val reminders = app.repository.getActiveRemindersList()
                 for (reminder in reminders) {
                     alarmScheduler.schedule(reminder)
@@ -150,7 +149,7 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
             } else {
                 _uiState.value = _uiState.value.copy(
                     isRestoring = false,
-                    backupStatus = "Restore failed — check backup folder"
+                    backupStatus = "Restore failed — check the selected file"
                 )
             }
         }
@@ -184,9 +183,9 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
     fun triggerManualBackup() {
         viewModelScope.launch {
             _uiState.value = _uiState.value.copy(backupStatus = "Backing up...")
-            val error = backupManager.performBackup()
+            val (fileName, error) = backupManager.performManualBackup()
             _uiState.value = _uiState.value.copy(
-                backupStatus = if (error == null) "Backup completed" else "Backup failed: $error"
+                backupStatus = if (fileName != null) "Saved: $fileName" else "Backup failed: $error"
             )
         }
     }
