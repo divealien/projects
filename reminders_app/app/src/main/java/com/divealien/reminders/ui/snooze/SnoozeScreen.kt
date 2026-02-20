@@ -135,7 +135,7 @@ fun SnoozeScreen(
             Spacer(Modifier.height(8.dp))
 
             val dateFormatter = remember { DateTimeFormatter.ofPattern("EEE, MMM d, yyyy") }
-            val timeFormatter = remember { DateTimeFormatter.ofPattern("h:mm a") }
+            val timeFormatter = remember { DateTimeFormatter.ofPattern("HH:mm") }
 
             OutlinedButton(
                 onClick = { showDatePicker = true },

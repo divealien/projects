@@ -56,16 +56,7 @@ sealed class SnoozePreset {
 
         override fun settingsLabel(): String = timeLabel()
 
-        private fun timeLabel(): String {
-            val period = if (hour < 12) "AM" else "PM"
-            val displayHour = when {
-                hour == 0 -> 12
-                hour > 12 -> hour - 12
-                else -> hour
-            }
-            return if (minute == 0) "$displayHour $period"
-            else "$displayHour:%02d $period".format(minute)
-        }
+        private fun timeLabel(): String = "%02d:%02d".format(hour, minute)
     }
 
     companion object {
