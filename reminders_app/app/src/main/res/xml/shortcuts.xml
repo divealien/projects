@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<shortcuts xmlns:android="http://schemas.android.com/apk/res/android">
+    <shortcut
+        android:shortcutId="new_reminder"
+        android:enabled="true"
+        android:icon="@drawable/ic_shortcut_add"
+        android:shortcutShortLabel="@string/shortcut_new_reminder"
+        android:shortcutLongLabel="@string/shortcut_new_reminder_long">
+        <intent
+            android:action="android.intent.action.VIEW"
+            android:targetPackage="com.divealien.reminders"
+            android:targetClass="com.divealien.reminders.ui.MainActivity">
+            <extra android:name="shortcut_action" android:value="new_reminder" />
+        </intent>
+    </shortcut>
+</shortcuts>

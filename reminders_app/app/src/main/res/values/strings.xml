@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Reminders</string>
+    <string name="channel_name">Reminders</string>
+    <string name="channel_description">Reminder notifications</string>
+    <string name="add_reminder">Add Reminder</string>
+    <string name="edit_reminder">Edit Reminder</string>
+    <string name="title">Title</string>
+    <string name="notes">Notes</string>
+    <string name="save">Save</string>
+    <string name="delete">Delete</string>
+    <string name="cancel">Cancel</string>
+    <string name="settings">Settings</string>
+    <string name="snooze">Snooze</string>
+    <string name="snooze_10_min">10 min</string>
+    <string name="snooze_30_min">30 min</string>
+    <string name="snooze_1_hour">1 hour</string>
+    <string name="done">Done</string>
+    <string name="no_reminders">No reminders yet</string>
+    <string name="pick_backup_folder">Pick Backup Folder</string>
+    <string name="restore_from_backup">Restore from Backup</string>
+    <string name="backup_status">Backup Status</string>
+    <string name="delete_confirmation">Delete this reminder?</string>
+    <string name="delete_confirm_message">This action cannot be undone.</string>
+    <string name="shortcut_new_reminder">New Reminder</string>
+    <string name="shortcut_new_reminder_long">Create a new reminder</string>
+</resources>
