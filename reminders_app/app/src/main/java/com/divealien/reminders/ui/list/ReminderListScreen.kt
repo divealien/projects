@@ -1,11 +1,12 @@
 package com.divealien.reminders.ui.list
 
 import androidx.compose.animation.animateColorAsState
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -55,14 +56,17 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.divealien.reminders.domain.model.Reminder
 import com.divealien.reminders.util.DateTimeUtils
+import java.time.LocalDate
+import java.time.format.DateTimeFormatter
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
 fun ReminderListScreen(
     onAddReminder: () -> Unit,
@@ -75,15 +79,42 @@ fun ReminderListScreen(
     var reminderToDelete by remember { mutableStateOf<Reminder?>(null) }
     var isSearchActive by remember { mutableStateOf(false) }
     val focusRequester = remember { FocusRequester() }
+    val dayFmt = remember { DateTimeFormatter.ofPattern("EEE d MMM") }
 
-    // Sort: enabled+future first (by time), then disabled/past at bottom
-    val sortedReminders = remember(reminders, searchQuery) {
+    val grouped: List<Pair<String, List<Reminder>>> = remember(reminders, searchQuery) {
+        val today = LocalDate.now()
+        val tomorrow = today.plusDays(1)
+
         val filtered = if (searchQuery.isBlank()) reminders
         else reminders.filter { it.title.contains(searchQuery, ignoreCase = true) }
-        filtered.sortedWith(
+
+        val sorted = filtered.sortedWith(
             compareByDescending<Reminder> { it.isEnabled }
                 .thenBy { if (it.isEnabled) it.nextTriggerTime else Long.MAX_VALUE }
         )
+
+        val (enabled, disabled) = sorted.partition { it.isEnabled }
+
+        val enabledGroups = enabled
+            .groupBy { reminder ->
+                DateTimeUtils.fromEpochMillis(
+                    if (reminder.isSnoozed && reminder.snoozeUntil != null) reminder.snoozeUntil
+                    else reminder.nextTriggerTime
+                ).toLocalDate()
+            }
+            .map { (date, group) ->
+                val dayStr = date.format(dayFmt)
+                val label = when (date) {
+                    today -> "Today  $dayStr"
+                    tomorrow -> "Tomorrow  $dayStr"
+                    else -> dayStr
+                }
+                label to group
+            }
+
+        val disabledGroup = if (disabled.isNotEmpty()) listOf("Disabled" to disabled) else emptyList()
+
+        enabledGroups + disabledGroup
     }
 
     LaunchedEffect(isSearchActive) {
@@ -139,7 +170,7 @@ fun ReminderListScreen(
             }
         }
     ) { padding ->
-        if (sortedReminders.isEmpty()) {
+        if (grouped.isEmpty()) {
             Box(
                 modifier = Modifier
                     .fillMaxSize()
@@ -157,25 +188,26 @@ fun ReminderListScreen(
                 modifier = Modifier
                     .fillMaxSize()
                     .padding(padding),
-                verticalArrangement = Arrangement.spacedBy(8.dp),
-                contentPadding = androidx.compose.foundation.layout.PaddingValues(
-                    horizontal = 16.dp,
-                    vertical = 8.dp
-                )
+                verticalArrangement = Arrangement.spacedBy(5.dp),
+                contentPadding = PaddingValues(bottom = 80.dp)
             ) {
-                items(sortedReminders, key = { it.id }) { reminder ->
-                    SwipeToDismissItem(
-                        reminder = reminder,
-                        onEdit = { onEditReminder(reminder.id) },
-                        onDelete = { reminderToDelete = reminder },
-                        onToggle = { viewModel.toggleEnabled(reminder) }
-                    )
+                grouped.forEach { (label, groupReminders) ->
+                    stickyHeader(key = "header_$label") {
+                        DateGroupHeader(label)
+                    }
+                    items(groupReminders, key = { it.id }) { reminder ->
+                        SwipeToDismissItem(
+                            reminder = reminder,
+                            onEdit = { onEditReminder(reminder.id) },
+                            onDelete = { reminderToDelete = reminder },
+                            onToggle = { viewModel.toggleEnabled(reminder) }
+                        )
+                    }
                 }
             }
         }
     }
 
-    // Delete confirmation dialog
     reminderToDelete?.let { reminder ->
         AlertDialog(
             onDismissRequest = { reminderToDelete = null },
@@ -198,6 +230,19 @@ fun ReminderListScreen(
     }
 }
 
+@Composable
+private fun DateGroupHeader(label: String) {
+    Text(
+        text = label,
+        style = MaterialTheme.typography.labelMedium,
+        color = MaterialTheme.colorScheme.primary,
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(MaterialTheme.colorScheme.background)
+            .padding(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 4.dp)
+    )
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun SwipeToDismissItem(
@@ -210,7 +255,7 @@ private fun SwipeToDismissItem(
         confirmValueChange = { value ->
             if (value == SwipeToDismissBoxValue.EndToStart) {
                 onDelete()
-                false // Don't dismiss, let the dialog handle it
+                false
             } else {
                 false
             }
@@ -219,6 +264,7 @@ private fun SwipeToDismissItem(
 
     SwipeToDismissBox(
         state = dismissState,
+        modifier = Modifier.padding(horizontal = 16.dp),
         backgroundContent = {
             val color by animateColorAsState(
                 when (dismissState.targetValue) {
@@ -258,6 +304,10 @@ private fun ReminderCard(
     onToggle: () -> Unit
 ) {
     val alpha = if (reminder.isEnabled) 1f else 0.5f
+    val timeText = if (reminder.isSnoozed && reminder.snoozeUntil != null)
+        DateTimeUtils.formatTime(reminder.snoozeUntil)
+    else
+        DateTimeUtils.formatTime(reminder.nextTriggerTime)
 
     Card(
         modifier = Modifier
@@ -273,64 +323,60 @@ private fun ReminderCard(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(16.dp),
+                .padding(horizontal = 12.dp, vertical = 0.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Column(
-                modifier = Modifier
-                    .weight(1f)
-                    .then(Modifier.let { if (alpha < 1f) it else it })
-            ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(
-                        text = reminder.title,
-                        style = MaterialTheme.typography.titleMedium,
-                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = alpha)
-                    )
-                    if (reminder.isRecurring) {
-                        Spacer(Modifier.width(6.dp))
-                        Icon(
-                            Icons.Default.Repeat,
-                            contentDescription = "Recurring",
-                            modifier = Modifier.size(16.dp),
-                            tint = MaterialTheme.colorScheme.primary.copy(alpha = alpha)
-                        )
-                    }
-                    if (reminder.isSnoozed) {
-                        Spacer(Modifier.width(6.dp))
-                        Icon(
-                            Icons.Default.Snooze,
-                            contentDescription = "Snoozed",
-                            modifier = Modifier.size(16.dp),
-                            tint = MaterialTheme.colorScheme.tertiary.copy(alpha = alpha)
-                        )
-                    }
-                }
-                Spacer(Modifier.height(4.dp))
-                Text(
-                    text = if (reminder.isSnoozed && reminder.snoozeUntil != null)
-                        "Snoozed until ${DateTimeUtils.formatDateTime(reminder.snoozeUntil)}"
-                    else
-                        DateTimeUtils.formatDateTime(reminder.nextTriggerTime),
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = alpha)
+            Text(
+                text = timeText,
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = alpha),
+                modifier = Modifier.width(44.dp)
+            )
+            Text(
+                text = reminder.title,
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurface.copy(alpha = alpha),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f)
+            )
+            if (reminder.isRecurring) {
+                Spacer(Modifier.width(4.dp))
+                Icon(
+                    Icons.Default.Repeat,
+                    contentDescription = "Recurring",
+                    modifier = Modifier.size(14.dp),
+                    tint = MaterialTheme.colorScheme.primary.copy(alpha = alpha)
                 )
             }
-
+            if (reminder.isSnoozed) {
+                Spacer(Modifier.width(4.dp))
+                Icon(
+                    Icons.Default.Snooze,
+                    contentDescription = "Snoozed",
+                    modifier = Modifier.size(14.dp),
+                    tint = MaterialTheme.colorScheme.tertiary.copy(alpha = alpha)
+                )
+            }
             Spacer(Modifier.width(8.dp))
-
-            Switch(
-                checked = reminder.isEnabled,
-                onCheckedChange = { onToggle() },
-                thumbContent = {
-                    Icon(
-                        if (reminder.isEnabled) Icons.Default.Notifications
-                        else Icons.Default.NotificationsOff,
-                        contentDescription = null,
-                        modifier = Modifier.size(16.dp)
-                    )
-                }
-            )
+            Box(
+                modifier = Modifier.height(32.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                Switch(
+                    checked = reminder.isEnabled,
+                    onCheckedChange = { onToggle() },
+                    modifier = Modifier.scale(0.75f),
+                    thumbContent = {
+                        Icon(
+                            if (reminder.isEnabled) Icons.Default.Notifications
+                            else Icons.Default.NotificationsOff,
+                            contentDescription = null,
+                            modifier = Modifier.size(16.dp)
+                        )
+                    }
+                )
+            }
         }
     }
 }
