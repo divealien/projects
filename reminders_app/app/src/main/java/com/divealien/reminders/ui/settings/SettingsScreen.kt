@@ -78,6 +78,12 @@ fun SettingsScreen(
         }
     }
 
+    val csvPickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocument()
+    ) { uri: Uri? ->
+        uri?.let { viewModel.importReminders(it) }
+    }
+
     Scaffold(
         topBar = {
             TopAppBar(
@@ -165,6 +171,32 @@ fun SettingsScreen(
                 ) {
                     Text("Restore from Backup")
                 }
+            }
+
+            Spacer(Modifier.height(24.dp))
+
+            // Import section
+            Text(
+                "Import",
+                style = MaterialTheme.typography.titleMedium,
+                color = MaterialTheme.colorScheme.primary
+            )
+            Spacer(Modifier.height(8.dp))
+
+            OutlinedButton(
+                onClick = { csvPickerLauncher.launch(arrayOf("text/*", "*/*")) },
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text("Import Reminders from CSV")
+            }
+
+            if (uiState.importStatus.isNotEmpty()) {
+                Spacer(Modifier.height(6.dp))
+                Text(
+                    uiState.importStatus,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
             }
 
             Spacer(Modifier.height(24.dp))
