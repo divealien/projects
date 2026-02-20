@@ -23,7 +23,6 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.DatePicker
 import androidx.compose.material3.DatePickerDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedCard
@@ -190,9 +189,12 @@ private fun PendingReminderCard(
                 ) {
                     Text("COMPLETE")
                 }
-                FilledTonalButton(
+                Button(
                     onClick = onSnoozeClick,
-                    modifier = Modifier.weight(1f)
+                    modifier = Modifier.weight(1f),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = MaterialTheme.colorScheme.primary
+                    )
                 ) {
                     Text("SNOOZE")
                 }
@@ -205,7 +207,7 @@ private fun PendingReminderCard(
                     verticalArrangement = Arrangement.spacedBy(0.dp)
                 ) {
                     snoozePresets.forEach { preset ->
-                        FilledTonalButton(onClick = { onSnooze(preset) }) {
+                        OutlinedButton(onClick = { onSnooze(preset) }) {
                             Text(preset.displayLabel())
                         }
                     }
