@@ -14,3 +14,6 @@
 *.class
 /app/release
 /app/debug
+*.mp4
+/bz-reminders-extractor/frames
+/__pycache__
