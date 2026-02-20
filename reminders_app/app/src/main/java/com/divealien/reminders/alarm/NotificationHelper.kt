@@ -5,8 +5,6 @@ import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
-import android.view.View
-import android.widget.RemoteViews
 import androidx.core.app.NotificationCompat
 import com.divealien.reminders.R
 import com.divealien.reminders.domain.model.Reminder
@@ -36,13 +34,18 @@ class NotificationHelper(private val context: Context) {
         val completePendingIntent = buildCompletePendingIntent(reminder)
         val snoozePendingIntent = buildSnoozePendingIntent(reminder)
 
-        val remoteViews = buildRemoteViews(reminder, completePendingIntent, snoozePendingIntent)
+        val timeText = DateTimeUtils.formatTime(reminder.nextTriggerTime)
+        val bigText = if (reminder.notes.isNotBlank())
+            "$timeText\n${reminder.notes}" else timeText
 
         val builder = NotificationCompat.Builder(context, Constants.NOTIFICATION_CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_notification)
-            .setCustomContentView(remoteViews)
-            .setCustomBigContentView(remoteViews)
-            .setStyle(NotificationCompat.DecoratedCustomViewStyle())
+            .setContentTitle(reminder.title)
+            .setContentText(timeText)
+            .setStyle(NotificationCompat.BigTextStyle().bigText(bigText))
+            .setContentIntent(snoozePendingIntent)
+            .addAction(0, "Complete", completePendingIntent)
+            .addAction(0, "Snooze", snoozePendingIntent)
             .setPriority(NotificationCompat.PRIORITY_HIGH)
             .setCategory(NotificationCompat.CATEGORY_REMINDER)
             .setAutoCancel(false)
@@ -52,30 +55,6 @@ class NotificationHelper(private val context: Context) {
 
         notificationManager.notify(reminder.id.toInt(), builder.build())
         updateGroupSummary()
-    }
-
-    private fun buildRemoteViews(
-        reminder: Reminder,
-        completePendingIntent: PendingIntent,
-        snoozePendingIntent: PendingIntent
-    ): RemoteViews {
-        val views = RemoteViews(context.packageName, R.layout.notification_reminder)
-
-        val timeText = DateTimeUtils.formatTime(reminder.nextTriggerTime)
-        views.setTextViewText(R.id.notification_time, timeText)
-        views.setTextViewText(R.id.notification_title, reminder.title)
-
-        if (reminder.notes.isNotBlank()) {
-            views.setTextViewText(R.id.notification_notes, reminder.notes)
-            views.setViewVisibility(R.id.notification_notes, View.VISIBLE)
-        } else {
-            views.setViewVisibility(R.id.notification_notes, View.GONE)
-        }
-
-        views.setOnClickPendingIntent(R.id.btn_complete, completePendingIntent)
-        views.setOnClickPendingIntent(R.id.btn_snooze, snoozePendingIntent)
-
-        return views
     }
 
     private fun buildCompletePendingIntent(reminder: Reminder): PendingIntent {
