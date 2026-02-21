@@ -25,7 +25,8 @@ data class SettingsUiState(
     val importStatus: String = "",
     val snoozePresets: List<SnoozePreset> = SnoozePreset.defaults,
     val retentionDays: Int = 30,
-    val dismissSnoozeMinutes: Int = 30
+    val dismissSnoozeMinutes: Int = 30,
+    val dailyBackupKeep: Int = 7
 )
 
 class SettingsViewModel(application: Application) : AndroidViewModel(application) {
@@ -40,6 +41,7 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
     private val snoozePresetsKey = stringPreferencesKey("snooze_presets")
     private val retentionDaysKey = intPreferencesKey("retention_days")
     private val dismissSnoozeKey = intPreferencesKey("dismiss_snooze_minutes")
+    private val dailyBackupKeepKey = intPreferencesKey("daily_backup_keep")
 
     init {
         viewModelScope.launch {
@@ -47,12 +49,14 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
             val presets = loadSnoozePresets()
             val retention = loadRetentionDays()
             val dismissMinutes = loadDismissSnoozeMinutes()
+            val dailyKeep = app.settingsDataStore.data.map { it[dailyBackupKeepKey] ?: 7 }.first()
             _uiState.value = _uiState.value.copy(
                 backupFolderUri = uri,
                 backupStatus = if (uri != null) "Backup folder set" else "No backup folder selected",
                 snoozePresets = presets,
                 retentionDays = retention,
-                dismissSnoozeMinutes = dismissMinutes
+                dismissSnoozeMinutes = dismissMinutes,
+                dailyBackupKeep = dailyKeep
             )
         }
     }
@@ -98,6 +102,15 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
                 prefs[retentionDaysKey] = days
             }
             _uiState.value = _uiState.value.copy(retentionDays = days)
+        }
+    }
+
+    fun setDailyBackupKeep(days: Int) {
+        viewModelScope.launch {
+            app.settingsDataStore.edit { prefs ->
+                prefs[dailyBackupKeepKey] = days
+            }
+            _uiState.value = _uiState.value.copy(dailyBackupKeep = days)
         }
     }
 

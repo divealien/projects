@@ -23,6 +23,7 @@ import java.io.BufferedReader
 import java.io.InputStreamReader
 import java.time.DayOfWeek
 import java.time.Instant
+import java.time.LocalDate
 import java.time.LocalDateTime
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
@@ -131,6 +132,32 @@ class BackupManager(private val context: Context, private val dao: ReminderDao) 
             e.printStackTrace()
             false
         }
+    }
+
+    /**
+     * Daily scheduled backup. Writes reminders_daily_YYYYMMDD.csv and deletes
+     * any older daily backups beyond [keepCount]. Returns null on success or if
+     * no folder is configured (skip silently), error string on failure.
+     */
+    suspend fun performDailyBackup(keepCount: Int): String? {
+        val uriString = getBackupFolderUri() ?: return null // no folder — skip silently
+        val folderUri = Uri.parse(uriString)
+
+        val today = LocalDate.now().format(DateTimeFormatter.ofPattern("yyyyMMdd"))
+        val fileName = "reminders_daily_$today.csv"
+        val error = performBackup(fileName)
+        if (error != null) return error
+
+        // Prune old daily backups beyond keepCount
+        try {
+            val folder = DocumentFile.fromTreeUri(context, folderUri) ?: return null
+            val dailyFiles = folder.listFiles()
+                .filter { it.name?.startsWith("reminders_daily_") == true && it.name?.endsWith(".csv") == true }
+                .sortedByDescending { it.name } // newest first (YYYYMMDD sorts lexicographically)
+            dailyFiles.drop(keepCount).forEach { it.delete() }
+        } catch (_: Exception) { /* non-fatal — backup was written successfully */ }
+
+        return null
     }
 
     /**

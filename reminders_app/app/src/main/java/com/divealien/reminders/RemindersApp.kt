@@ -2,7 +2,11 @@ package com.divealien.reminders
 
 import android.app.Application
 import androidx.datastore.preferences.core.intPreferencesKey
+import androidx.work.ExistingPeriodicWorkPolicy
+import androidx.work.PeriodicWorkRequestBuilder
+import androidx.work.WorkManager
 import com.divealien.reminders.alarm.AlarmScheduler
+import com.divealien.reminders.alarm.BackupWorker
 import com.divealien.reminders.alarm.NotificationHelper
 import com.divealien.reminders.data.backup.BackupManager
 import com.divealien.reminders.data.backup.settingsDataStore
@@ -13,6 +17,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
+import java.util.concurrent.TimeUnit
 
 class RemindersApp : Application() {
 
@@ -43,6 +48,14 @@ class RemindersApp : Application() {
         )
 
         notificationHelper.createChannel()
+
+        // Schedule daily versioned backup
+        val dailyBackupRequest = PeriodicWorkRequestBuilder<BackupWorker>(1, TimeUnit.DAYS).build()
+        WorkManager.getInstance(this).enqueueUniquePeriodicWork(
+            "daily_backup",
+            ExistingPeriodicWorkPolicy.KEEP,
+            dailyBackupRequest
+        )
 
         // Auto-cleanup old completed reminders
         CoroutineScope(Dispatchers.IO).launch {

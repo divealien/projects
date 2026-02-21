@@ -1,8 +1,10 @@
 package com.divealien.reminders.ui.settings
 
+import android.app.Activity
 import android.content.Intent
 import android.net.Uri
 import android.os.Build
+import android.provider.DocumentsContract
 import android.provider.Settings
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -85,9 +87,11 @@ fun SettingsScreen(
     }
 
     val restorePickerLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.OpenDocument()
-    ) { uri: Uri? ->
-        uri?.let { pendingRestoreUri = it }
+        contract = ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        if (result.resultCode == Activity.RESULT_OK) {
+            result.data?.data?.let { pendingRestoreUri = it }
+        }
     }
 
     Scaffold(
@@ -171,11 +175,61 @@ fun SettingsScreen(
                 Spacer(Modifier.height(8.dp))
 
                 OutlinedButton(
-                    onClick = { restorePickerLauncher.launch(arrayOf("text/*", "*/*")) },
+                    onClick = {
+                        val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
+                            addCategory(Intent.CATEGORY_OPENABLE)
+                            type = "text/*"
+                            putExtra(Intent.EXTRA_MIME_TYPES, arrayOf("text/csv", "text/plain", "text/comma-separated-values"))
+                            uiState.backupFolderUri?.let { uriStr ->
+                                val treeUri = Uri.parse(uriStr)
+                                val docUri = DocumentsContract.buildDocumentUriUsingTree(
+                                    treeUri,
+                                    DocumentsContract.getTreeDocumentId(treeUri)
+                                )
+                                putExtra(DocumentsContract.EXTRA_INITIAL_URI, docUri)
+                            }
+                        }
+                        restorePickerLauncher.launch(intent)
+                    },
                     modifier = Modifier.fillMaxWidth(),
                     enabled = !uiState.isRestoring
                 ) {
                     Text("Restore from Backup…")
+                }
+
+                Spacer(Modifier.height(12.dp))
+
+                var keepExpanded by remember { mutableStateOf(false) }
+                val keepOptions = listOf(3, 7, 14, 30)
+
+                ExposedDropdownMenuBox(
+                    expanded = keepExpanded,
+                    onExpandedChange = { keepExpanded = it }
+                ) {
+                    OutlinedTextField(
+                        value = "${uiState.dailyBackupKeep} daily backups",
+                        onValueChange = {},
+                        readOnly = true,
+                        label = { Text("Rolling daily backups to keep") },
+                        trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = keepExpanded) },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .menuAnchor(MenuAnchorType.PrimaryNotEditable)
+                    )
+                    ExposedDropdownMenu(
+                        expanded = keepExpanded,
+                        onDismissRequest = { keepExpanded = false }
+                    ) {
+                        keepOptions.forEach { n ->
+                            DropdownMenuItem(
+                                text = { Text("$n days") },
+                                onClick = {
+                                    viewModel.setDailyBackupKeep(n)
+                                    keepExpanded = false
+                                }
+                            )
+                        }
+                    }
                 }
             }
 
@@ -190,7 +244,7 @@ fun SettingsScreen(
             Spacer(Modifier.height(8.dp))
 
             OutlinedButton(
-                onClick = { csvPickerLauncher.launch(arrayOf("text/*", "*/*")) },
+                onClick = { csvPickerLauncher.launch(arrayOf("text/csv", "text/plain", "text/comma-separated-values")) },
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Text("Import Reminders from CSV")
