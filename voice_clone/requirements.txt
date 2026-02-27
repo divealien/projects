@@ -1,0 +1,6 @@
+f5-tts
+soundfile
+librosa
+scipy
+pydub
+nltk

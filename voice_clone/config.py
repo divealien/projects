@@ -1,0 +1,10 @@
+MODEL_NAME = "F5-TTS"          # or "E2-TTS" as alternative
+SAMPLE_RATE = 24000            # F5-TTS native sample rate
+OUTPUT_SAMPLE_RATE = 44100     # output WAV sample rate
+REFERENCE_WAV_MIN_SEC = 6
+REFERENCE_WAV_MAX_SEC = 30
+REFERENCE_WAV_IDEAL_SEC = 12  # target when auto-extracting from longer files
+DEFAULT_LANGUAGE = "en"
+VOICES_DIR = "voices"
+OUTPUT_DIR = "output"
+DEVICE = "cuda"  # force GPU
