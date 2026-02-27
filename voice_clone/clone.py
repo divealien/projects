@@ -212,10 +212,16 @@ def main():
     text_group = parser.add_mutually_exclusive_group(required=True)
     text_group.add_argument("--text", help="Text to synthesize")
     text_group.add_argument("--text-file", metavar="FILE", help="Path to text file to synthesize")
-    parser.add_argument(
+    ref_text_group = parser.add_mutually_exclusive_group()
+    ref_text_group.add_argument(
         "--ref-text",
         default="",
         help="Transcript of the reference WAV (improves quality; auto-transcribed if omitted)",
+    )
+    ref_text_group.add_argument(
+        "--ref-text-file",
+        metavar="FILE",
+        help="Path to a text file containing the reference WAV transcript",
     )
     parser.add_argument(
         "--out",
@@ -231,11 +237,17 @@ def main():
     else:
         text = args.text
 
+    if args.ref_text_file:
+        with open(args.ref_text_file, encoding="utf-8") as f:
+            ref_text = f.read().strip()
+    else:
+        ref_text = args.ref_text
+
     synthesize(
         text=text,
         reference_wav=args.ref,
         output_path=args.out,
-        ref_text=args.ref_text,
+        ref_text=ref_text,
         language=args.language,
     )
 
