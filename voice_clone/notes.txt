@@ -1,0 +1,14 @@
+To generate the transcript file from your reference audio with Whisper:
+
+  # Install if needed
+  pip install openai-whisper
+
+  # Transcribe — output goes to sarno.txt
+  whisper voices/sarno.wav --model medium --output_format txt --output_dir voices/
+
+  Then pass it:
+  python clone.py --ref voices/sarno.wav --ref-text-file voices/sarno.txt --text-file input.txt --out output/result.wav
+
+  The key benefit beyond quality: the transcript is generated once and reused for every synthesis run, skipping Whisper on each call. You can also manually
+  edit the file to fix any transcription errors before using it.
+
