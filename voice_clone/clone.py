@@ -6,13 +6,13 @@ Requires CUDA — will assert and exit if GPU is not available.
 
 Usage:
     python clone.py --ref voices/speaker.wav --text "Hello world" --out output/result.wav
+    python clone.py --ref voices/speaker.wav --text-file input.txt --out output/result.wav
     python clone.py --ref voices/speaker.wav --ref-text "Known transcript." --text "Hello world" --out output/result.wav
 """
 
 import argparse
 import os
 import re
-import tempfile
 
 # Must be set before any CUDA allocations
 os.environ.setdefault("PYTORCH_ALLOC_CONF", "expandable_segments:True")
@@ -22,6 +22,7 @@ import numpy as np
 import soundfile as sf
 import torch
 from f5_tts.api import F5TTS
+from f5_tts.infer.utils_infer import preprocess_ref_audio_text as _f5_preprocess
 from pydub import AudioSegment
 
 from config import DEFAULT_LANGUAGE, OUTPUT_DIR, OUTPUT_SAMPLE_RATE, SAMPLE_RATE
@@ -32,10 +33,12 @@ try:
 except LookupError:
     nltk.download("punkt_tab", quiet=True)
 
-_LONG_TEXT_THRESHOLD = 500  # characters; split into sentences above this
+# F5-TTS internal mel spectrogram constants (must match the model config)
+_HOP_LENGTH = 256
+_GEN_PADDING_FRAMES = 50  # ~0.53 s safety buffer after estimated gen content
 
 # Symbols whose spoken form is much longer than their character count.
-# F5-TTS splits ref/gen audio by character ratio, so unexpanded symbols
+# F5-TTS crops ref/gen audio by character ratio, so unexpanded symbols
 # shift the crop point and corrupt the output.
 _SYMBOL_EXPANSIONS = [
     (re.compile(r"(\d+)\s*%"), r"\1 percent"),
@@ -44,12 +47,43 @@ _SYMBOL_EXPANSIONS = [
     (re.compile(r"@"), "at"),
 ]
 
+# Cache of ref_file → (processed_wav_path, processed_duration_sec)
+_ref_proc_cache: dict[str, tuple[str, float]] = {}
+
 
 def _normalize_ref_text(text: str) -> str:
     """Expand symbols so character count better matches spoken duration."""
     for pattern, replacement in _SYMBOL_EXPANSIONS:
         text = pattern.sub(replacement, text)
     return text.strip()
+
+
+def _preprocess_ref(ref_file: str, ref_text: str) -> tuple[str, float]:
+    """Run F5-TTS preprocessing once and cache (processed_path, duration_sec)."""
+    if ref_file not in _ref_proc_cache:
+        path, _ = _f5_preprocess(ref_file, ref_text, show_info=lambda _: None)
+        _ref_proc_cache[ref_file] = (path, sf.info(path).duration)
+    return _ref_proc_cache[ref_file]
+
+
+def _fit_ref_text(ref_text: str, ref_file: str) -> str:
+    """
+    Truncate ref_text so it matches the F5-TTS processed audio duration.
+
+    F5-TTS clips reference audio to ≤12 s internally. If ref_text covers more
+    speech than the clipped audio, the mel-frame crop overflows, causing:
+      - ref-text echo at the start of the generated output
+      - gen_text crammed into too few frames (sounds sped up)
+    """
+    orig_sec = sf.info(ref_file).duration
+    _, proc_sec = _preprocess_ref(ref_file, ref_text)
+    if proc_sec >= orig_sec:
+        return ref_text
+    ratio = proc_sec / orig_sec
+    n = max(1, int(len(ref_text) * ratio))
+    truncated = ref_text[:n]
+    last_space = truncated.rfind(" ")
+    return truncated[:last_space] if last_space > 0 else truncated
 
 
 def _get_tts() -> F5TTS:
@@ -66,12 +100,28 @@ def _get_tts() -> F5TTS:
 
 
 def _infer_single(tts: F5TTS, ref_file: str, ref_text: str, gen_text: str) -> np.ndarray:
+    # Truncate ref_text to match what's actually in F5-TTS's clipped reference,
+    # then derive frames_per_char from that consistent (audio, text) pair.
+    adapted_ref = _fit_ref_text(ref_text, ref_file)
+    proc_path, proc_sec = _preprocess_ref(ref_file, ref_text)
+    ref_frames = sf.info(proc_path).frames // _HOP_LENGTH
+    frames_per_char = ref_frames / max(len(adapted_ref.encode("utf-8")), 1)
+    gen_frames = int(frames_per_char * len(gen_text.strip().encode("utf-8"))) + _GEN_PADDING_FRAMES
+    fix_duration = (ref_frames + gen_frames) * _HOP_LENGTH / SAMPLE_RATE
+    print(
+        f"  ref_text: {len(ref_text)} → {len(adapted_ref)} chars  "
+        f"ref={proc_sec:.2f}s  gen_est={gen_frames * _HOP_LENGTH / SAMPLE_RATE:.2f}s  "
+        f"fix_duration={fix_duration:.2f}s"
+    )
+
     wav, sr, _ = tts.infer(
         ref_file=ref_file,
-        ref_text=ref_text,
+        ref_text=adapted_ref,
         gen_text=gen_text,
         speed=1.0,
+        fix_duration=fix_duration,
     )
+    print(f"  → {len(wav)/sr:.3f}s at {sr} Hz")
     if sr != SAMPLE_RATE:
         import librosa
         wav = librosa.resample(wav, orig_sr=sr, target_sr=SAMPLE_RATE)
@@ -124,20 +174,26 @@ def synthesize(
             print("  If output sounds wrong, re-run with --ref-text '<what the reference says>'.")
 
     ref_text = _normalize_ref_text(ref_text)
-    print(f"Normalized ref_text: {ref_text!r}")
+    print(f"ref_text: {ref_text!r}")
 
-    if len(text) > _LONG_TEXT_THRESHOLD:
-        print(f"Long text ({len(text)} chars) — splitting into sentences.")
-        sentences = nltk.sent_tokenize(text, language=language if language != "en" else "english")
-        wavs = []
-        for i, sentence in enumerate(sentences):
-            print(f"  Synthesizing sentence {i + 1}/{len(sentences)}: {sentence[:60]}...")
-            wav = _infer_single(tts, reference_wav, ref_text, sentence)
-            wavs.append(wav)
-            torch.cuda.empty_cache()
-        combined = _concat_wavs(wavs)
-    else:
-        combined = _infer_single(tts, reference_wav, ref_text, text)
+    # Normalise whitespace: collapse newlines/multiple spaces so sentence
+    # tokenisation works correctly and F5-TTS doesn't see embedded newlines.
+    text = " ".join(text.split())
+
+    # Always split into sentences so each _infer_single call gets its own
+    # fix_duration. F5-TTS also chunks gen_text internally; if we pass a long
+    # text with a fix_duration sized for the whole thing, each internal chunk
+    # gets that full duration and the model fills the excess with ref echo.
+    nltk_lang = language if language != "en" else "english"
+    sentences = [s for s in nltk.sent_tokenize(text, language=nltk_lang) if s.strip()]
+    print(f"Synthesising {len(sentences)} sentence(s).")
+    wavs = []
+    for i, sentence in enumerate(sentences):
+        print(f"  [{i + 1}/{len(sentences)}] {sentence[:80]}")
+        wav = _infer_single(tts, reference_wav, ref_text, sentence)
+        wavs.append(wav)
+        torch.cuda.empty_cache()
+    combined = _concat_wavs(wavs)
 
     print(f"GPU memory after synthesis:  {torch.cuda.memory_allocated() / 1e6:.1f} MB")
 
@@ -153,7 +209,9 @@ def synthesize(
 def main():
     parser = argparse.ArgumentParser(description="Clone a voice and synthesize speech with F5-TTS.")
     parser.add_argument("--ref", required=True, help="Path to reference WAV (6–30s, preprocessed)")
-    parser.add_argument("--text", required=True, help="Text to synthesize")
+    text_group = parser.add_mutually_exclusive_group(required=True)
+    text_group.add_argument("--text", help="Text to synthesize")
+    text_group.add_argument("--text-file", metavar="FILE", help="Path to text file to synthesize")
     parser.add_argument(
         "--ref-text",
         default="",
@@ -167,8 +225,14 @@ def main():
     parser.add_argument("--language", default=DEFAULT_LANGUAGE, help="Language code (default: en)")
     args = parser.parse_args()
 
+    if args.text_file:
+        with open(args.text_file, encoding="utf-8") as f:
+            text = f.read().strip()
+    else:
+        text = args.text
+
     synthesize(
-        text=args.text,
+        text=text,
         reference_wav=args.ref,
         output_path=args.out,
         ref_text=args.ref_text,
