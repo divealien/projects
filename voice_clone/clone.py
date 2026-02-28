@@ -99,26 +99,27 @@ def _get_tts() -> F5TTS:
     return tts
 
 
-def _infer_single(tts: F5TTS, ref_file: str, ref_text: str, gen_text: str) -> np.ndarray:
+def _infer_single(tts: F5TTS, ref_file: str, ref_text: str, gen_text: str, speed: float = 1.0) -> np.ndarray:
     # Truncate ref_text to match what's actually in F5-TTS's clipped reference,
     # then derive frames_per_char from that consistent (audio, text) pair.
     adapted_ref = _fit_ref_text(ref_text, ref_file)
     proc_path, proc_sec = _preprocess_ref(ref_file, ref_text)
     ref_frames = sf.info(proc_path).frames // _HOP_LENGTH
     frames_per_char = ref_frames / max(len(adapted_ref.encode("utf-8")), 1)
-    gen_frames = int(frames_per_char * len(gen_text.strip().encode("utf-8"))) + _GEN_PADDING_FRAMES
+    # Divide by speed: slower speech (speed < 1) needs proportionally more frames.
+    gen_frames = int(frames_per_char * len(gen_text.strip().encode("utf-8")) / speed) + _GEN_PADDING_FRAMES
     fix_duration = (ref_frames + gen_frames) * _HOP_LENGTH / SAMPLE_RATE
     print(
         f"  ref_text: {len(ref_text)} → {len(adapted_ref)} chars  "
         f"ref={proc_sec:.2f}s  gen_est={gen_frames * _HOP_LENGTH / SAMPLE_RATE:.2f}s  "
-        f"fix_duration={fix_duration:.2f}s"
+        f"fix_duration={fix_duration:.2f}s  speed={speed}"
     )
 
     wav, sr, _ = tts.infer(
         ref_file=ref_file,
         ref_text=adapted_ref,
         gen_text=gen_text,
-        speed=1.0,
+        speed=speed,
         fix_duration=fix_duration,
     )
     print(f"  → {len(wav)/sr:.3f}s at {sr} Hz")
@@ -145,6 +146,7 @@ def synthesize(
     output_path: str,
     ref_text: str = "",
     language: str = DEFAULT_LANGUAGE,
+    speed: float = 1.0,
 ) -> str:
     """
     Clone voice from reference_wav and synthesize text.
@@ -155,6 +157,7 @@ def synthesize(
         output_path:   Destination path for the generated WAV.
         ref_text:      Transcript of reference_wav. Empty string triggers auto-transcription.
         language:      Language code (e.g. "en", "fr"). Passed to F5-TTS.
+        speed:         Speech rate multiplier (1.0 = normal, 0.8 = 20% slower, 1.2 = faster).
 
     Returns:
         Path to the written output WAV file.
@@ -190,7 +193,7 @@ def synthesize(
     wavs = []
     for i, sentence in enumerate(sentences):
         print(f"  [{i + 1}/{len(sentences)}] {sentence[:80]}")
-        wav = _infer_single(tts, reference_wav, ref_text, sentence)
+        wav = _infer_single(tts, reference_wav, ref_text, sentence, speed=speed)
         wavs.append(wav)
         torch.cuda.empty_cache()
     combined = _concat_wavs(wavs)
@@ -229,6 +232,7 @@ def main():
         help="Output WAV path (default: output/result.wav)",
     )
     parser.add_argument("--language", default=DEFAULT_LANGUAGE, help="Language code (default: en)")
+    parser.add_argument("--speed", type=float, default=1.0, help="Speech rate (default: 1.0, slower: 0.8, faster: 1.2)")
     args = parser.parse_args()
 
     if args.text_file:
@@ -249,6 +253,7 @@ def main():
         output_path=args.out,
         ref_text=ref_text,
         language=args.language,
+        speed=args.speed,
     )
 
 
