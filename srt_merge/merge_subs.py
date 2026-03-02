@@ -176,7 +176,7 @@ def main():
     )
     parser.add_argument("mkv", help="Path to source MKV file")
     parser.add_argument("external_srt", help="Path to external SRT file")
-    parser.add_argument("-o", "--output", help="Output SRT path (default: <mkv_basename>_merged.srt)")
+    parser.add_argument("-o", "--output", help="Output SRT path (default: replaces external SRT in-place, original renamed to <name>_merged.srt)")
     parser.add_argument("-t", "--track", type=int, default=0, help="0-based subtitle track index (default: 0)")
     parser.add_argument("--list-tracks", action="store_true", help="List subtitle tracks and exit")
     parser.add_argument("--keep-tmp", action="store_true", help="Keep temporary extracted SRT file")
@@ -232,12 +232,15 @@ def main():
     # Determine output path
     if args.output:
         out_path = args.output
+        backup_path = None
     else:
-        base = os.path.splitext(os.path.basename(args.mkv))[0]
-        out_path = f"{base}_merged.srt"
+        ext_base = os.path.splitext(args.external_srt)[0]
+        out_path = args.external_srt          # merged replaces input name
+        backup_path = ext_base + "_merged.srt"  # input renamed here
 
-    # Check output exists
-    if os.path.exists(out_path) and not args.force:
+    # Check output / backup exists
+    check_path = backup_path if backup_path is not None else out_path
+    if os.path.exists(check_path) and not args.force:
         answer = input(f"Output file exists. Overwrite? [y/N]: ").strip().lower()
         if answer != "y":
             print("Aborted.")
@@ -267,7 +270,23 @@ def main():
             print("Warning: external SRT is empty — proceeding with MKV subs only.", file=sys.stderr)
 
         merged, dropped, kept = merge(mkv_subs, ext_subs)
-        write_srt(merged, out_path)
+
+        if backup_path is not None:
+            # Write to a temp file in the same directory (avoids cross-device rename).
+            # Only rename input → backup after the output is safely written.
+            ext_dir = os.path.dirname(os.path.abspath(args.external_srt))
+            tmp_out = tempfile.mktemp(suffix=".srt", dir=ext_dir)
+            try:
+                write_srt(merged, tmp_out)
+                # Input still intact here; now atomically swap.
+                os.rename(args.external_srt, backup_path)
+                os.rename(tmp_out, out_path)
+            except Exception:
+                if os.path.isfile(tmp_out):
+                    os.remove(tmp_out)
+                raise
+        else:
+            write_srt(merged, out_path)
 
         if args.verbose:
             print(f"Extracted MKV track:     {len(mkv_subs)} entries  (track {args.track}, language: {lang})")
@@ -277,6 +296,8 @@ def main():
             print(f"MKV entries:             {len(mkv_subs)}")
             print(f"Total merged output:     {len(merged)} entries")
             print(f"Written to:              {out_path}")
+            if backup_path is not None:
+                print(f"Original SRT backed up:  {backup_path}")
 
     finally:
         if not args.keep_tmp and os.path.isfile(tmp_path):
