@@ -1,16 +1,18 @@
 """
-Convert all audio files (wav, mp3, m4a, aif/aiff) in this folder
+Convert all audio files (wav, mp3, m4a, aif/aiff) in a folder
 to 44.1kHz, 16-bit, stereo WAV using ffmpeg.
 
 Non-wav files get a .wav extension. Existing wav files are converted
-in-place (via a temp file) if they don't already match the target spec.
+in-place; the original is preserved as file_orig.wav.
+
+Usage: python convert_to_wav.py <folder>
 """
 
+import argparse
 import subprocess
 import sys
 from pathlib import Path
 
-FOLDER = Path(__file__).parent
 EXTENSIONS = {".wav", ".mp3", ".m4a", ".aif", ".aiff"}
 TARGET_RATE = "44100"
 TARGET_BITS = "s16"  # signed 16-bit PCM
@@ -66,8 +68,17 @@ def convert(src: Path, dst: Path):
 
 
 def main():
+    parser = argparse.ArgumentParser(description="Convert audio files to 44.1kHz/16-bit/stereo WAV.")
+    parser.add_argument("folder", type=Path, help="Folder containing audio files to convert")
+    args = parser.parse_args()
+
+    folder = args.folder
+    if not folder.is_dir():
+        print(f"Error: '{folder}' is not a directory.", file=sys.stderr)
+        sys.exit(1)
+
     files = sorted(
-        f for f in FOLDER.iterdir()
+        f for f in folder.iterdir()
         if f.is_file() and f.suffix.lower() in EXTENSIONS
     )
 
@@ -89,16 +100,17 @@ def main():
                 print("    -> already 44.1k/16bit/stereo, skipping")
                 skipped += 1
                 continue
-            # Convert in-place via temp file
-            tmp = f.with_suffix(".tmp.wav")
-            if convert(f, tmp):
-                f.unlink()
-                tmp.rename(f)
-                print("    -> converted in-place")
+            # Rename original to file_orig.wav, convert it to file.wav
+            orig_backup = f.with_name(f.stem + "_orig.wav")
+            f.rename(orig_backup)
+            if convert(orig_backup, f):
+                print(f"    -> converted in-place, original saved as {orig_backup.name}")
                 converted += 1
             else:
-                if tmp.exists():
-                    tmp.unlink()
+                # Restore original on failure
+                if f.exists():
+                    f.unlink()
+                orig_backup.rename(f)
                 errors += 1
         else:
             # Non-wav: convert to .wav
@@ -108,8 +120,7 @@ def main():
                 skipped += 1
                 continue
             if convert(f, dst):
-                f.unlink()
-                print(f"    -> converted to {dst.name}, original removed")
+                print(f"    -> converted to {dst.name}")
                 converted += 1
             else:
                 errors += 1
