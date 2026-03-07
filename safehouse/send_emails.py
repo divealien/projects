@@ -12,8 +12,9 @@ from googleapiclient.discovery import build
 
 BASE_DIR = Path(__file__).parent
 SCOPES = ['https://www.googleapis.com/auth/gmail.compose']
-TOKEN_FILE = BASE_DIR / 'token.json'
-CREDS_FILE = BASE_DIR / 'credentials.json'
+GMAIL_DIR = Path.home() / '.gmail'
+TOKEN_FILE = GMAIL_DIR / 'token.json'
+CREDS_FILE = GMAIL_DIR / 'credentials.json'
 
 def get_gmail_service():
     creds = None
@@ -71,9 +72,9 @@ def load_links(path):
             line = line.strip()
             if not line:
                 continue
-            m = re.match(r'\[(mp3|wav)\]\s+(\S+)\.\w+:\s+(https?://\S+)', line)
+            m = re.match(r'(\S+)\.(mp3|wav):\s+(https?://\S+)', line)
             if m:
-                fmt, name, url = m.groups()
+                name, fmt, url = m.groups()
                 if name not in links:
                     links[name] = {}
                 links[name][fmt] = url
@@ -108,7 +109,12 @@ def generate_emails(round_id, deadline):
         recipient_num = row[next_col]
 
         person = names[recipient_num]
-        file_key = f"{round_id}{source_num}"
+        if col == 0:
+            file_key = f"{round_id}{source_num}"
+        else:
+            prev_round = headers[col - 1]
+            prev_num = row[col - 1]
+            file_key = f"{prev_round}{prev_num}_{round_id}{source_num}"
 
         mp3_url = links[file_key]['mp3']
         wav_url = links[file_key]['wav']
@@ -131,14 +137,15 @@ def generate_emails(round_id, deadline):
     return emails
 
 if __name__ == '__main__':
-    if len(sys.argv) < 3:
-        print(f"Usage: {sys.argv[0]} <round_id> <deadline> [--draft-first | --draft-all]")
-        print(f'Example: {sys.argv[0]} DD "10 March 2026" --draft-first')
+    if len(sys.argv) < 4:
+        print(f"Usage: {sys.argv[0]} <base_dir> <round_id> <deadline> [--draft-first | --draft-all | --preview]")
+        print(f'Example: {sys.argv[0]} /path/to/data DD "10 March 2026" --draft-first')
         sys.exit(1)
 
-    round_id = sys.argv[1]
-    deadline = sys.argv[2]
-    mode = sys.argv[3] if len(sys.argv) > 3 else '--preview'
+    BASE_DIR = Path(sys.argv[1])
+    round_id = sys.argv[2]
+    deadline = sys.argv[3]
+    mode = sys.argv[4] if len(sys.argv) > 4 else '--preview'
 
     emails = generate_emails(round_id, deadline)
 
