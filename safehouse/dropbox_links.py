@@ -47,17 +47,26 @@ if not os.path.isdir(local_folder):
     print(f"ERROR: Directory not found: {local_folder}")
     raise SystemExit(1)
 
-for dirpath, dirnames, filenames in os.walk(local_folder):
-    dirnames.sort()
-    for filename in sorted(filenames):
-        rel_path = os.path.relpath(
-            os.path.join(dirpath, filename), dropbox_root
-        ).replace("\\", "/")
-        dropbox_path = f"/{rel_path}"
-        subdir = os.path.relpath(dirpath, local_folder).replace("\\", "/")
-        if subdir == ".":
-            subdir = ""
-        else:
-            subdir = f"[{subdir}] "
-        link = get_shared_link(dropbox_path)
-        print(f"{subdir}{filename}: {link}")
+output_path = os.path.join(local_folder, "links.txt")
+
+with open(output_path, "w", encoding="utf-8") as out:
+    for dirpath, dirnames, filenames in os.walk(local_folder):
+        dirnames.sort()
+        for filename in sorted(filenames):
+            if filename == "links.txt":
+                continue
+            rel_path = os.path.relpath(
+                os.path.join(dirpath, filename), dropbox_root
+            ).replace("\\", "/")
+            dropbox_path = f"/{rel_path}"
+            subdir = os.path.relpath(dirpath, local_folder).replace("\\", "/")
+            if subdir == ".":
+                subdir = ""
+            else:
+                subdir = f"[{subdir}] "
+            link = get_shared_link(dropbox_path)
+            line = f"{subdir}{filename}: {link}"
+            print(line)
+            out.write(line + "\n")
+
+print(f"\nLinks saved to {output_path}")
